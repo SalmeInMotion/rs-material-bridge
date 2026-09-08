@@ -82,6 +82,8 @@ def compute():
 
 def main():
     hou_data, c4d_data, both, aliased, c4d_only, hou_only = compute()
+    hou_classes = {c.lower() for c in hou_data["classes"]}
+    c4d_classes = {c.lower() for c in c4d_data["classes"]} - set(EXCLUDED)
 
     lines = [
         "# RS Material Bridge -- node compatibility",

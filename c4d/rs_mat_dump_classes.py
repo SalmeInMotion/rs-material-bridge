@@ -20,7 +20,14 @@ for p in (_here, _FALLBACK_DIR):
     if os.path.isdir(p) and p not in sys.path:
         sys.path.insert(0, p)
 
-import rs_bridge_c4d_core
+try:
+    import rs_bridge_c4d_core
+except ImportError:
+    import c4d
+    c4d.gui.MessageDialog(
+        "rs_bridge_c4d_core.py not found next to this script.\n"
+        "Keep the whole rs-material-bridge folder together.")
+    raise
 importlib.reload(rs_bridge_c4d_core)
 
 

@@ -1,9 +1,9 @@
 # RS Material Bridge -- node compatibility
 
-Generated 2026-07-08 09:46 by tools/compat_report.py from the real node inventories of both apps:
+Generated 2026-09-08 19:02 by tools/compat_report.py from the real node inventories of both apps:
 
 - Houdini 21.0.700 (dumped 2026-07-08 09:37:19): 160 RS node classes
-- C4D 2024400 (dumped 2026-07-06 20:45:50): 160 RS node classes
+- C4D 2024400 (dumped 2026-07-09 11:50:40): 160 RS node classes
 
 A class listed as portable means the *node* exists on both sides; individual parameters may still raise paste warnings (ramps, odd enums). Re-generate after Redshift updates -- the dumps refresh automatically on every Copy.
 

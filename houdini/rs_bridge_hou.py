@@ -65,8 +65,10 @@ _TEX_PARM_RE = re.compile(r"^tex\d+$", re.IGNORECASE)
 def _write_clip(data):
     if not os.path.isdir(BRIDGE_DIR):
         os.makedirs(BRIDGE_DIR)
-    with open(CLIP_FILE, "w", encoding="utf-8") as f:
+    tmp = CLIP_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, CLIP_FILE)  # atomic: never a half-written clipboard
 
 
 def _read_clip():
@@ -74,11 +76,37 @@ def _read_clip():
         raise RuntimeError("Bridge clipboard not found: %s\n"
                            "Copy a material first (from Houdini or C4D)."
                            % CLIP_FILE)
-    with open(CLIP_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(CLIP_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except ValueError:
+        raise RuntimeError("Bridge clipboard is corrupt: %s\n"
+                           "Run Copy again." % CLIP_FILE)
     if data.get("format") != FORMAT_NAME:
         raise RuntimeError("Not a %s file: %s" % (FORMAT_NAME, CLIP_FILE))
+    if data.get("version", 1) > FORMAT_VERSION:
+        raise RuntimeError("Clipboard was written by a newer bridge "
+                           "(format v%s, this side reads v%s). Update the "
+                           "bridge on this side."
+                           % (data.get("version"), FORMAT_VERSION))
     return data
+
+
+def _ui_status(msg):
+    try:
+        if hou.isUIAvailable():
+            hou.ui.setStatusMessage(msg)
+    except Exception:
+        pass
+
+
+def _ui_error(msg):
+    print(msg)
+    try:
+        if hou.isUIAvailable():
+            hou.ui.displayMessage(msg, severity=hou.severityType.Error)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +200,7 @@ def _export_parms(node, warnings):
     return params
 
 
-def _connection_record(conn, dst):
+def _connection_record(conn, dst, warnings=None):
     """Return (src_node, src_out_name, dst_in_name) for a connection
     feeding `dst`, resolving hou.NodeConnection's ambiguous naming by
     validating names against the actual connector lists."""
@@ -195,9 +223,15 @@ def _connection_record(conn, dst):
                    None)
     if src_out is None and src_outputs:
         src_out = src_outputs[0]
+        if warnings is not None and len(src_outputs) > 1:
+            warnings.append("%s: source output of the wire from '%s' could "
+                            "not be resolved by name, assuming its first "
+                            "output '%s' -- verify this connection"
+                            % (dst.name(), src.name(), src_out))
     if dst_in is None:
-        # Last resort: index-based lookup.
-        for getter in ("outputIndex", "inputIndex"):
+        # Last resort: index-based lookup (inputIndex first: it indexes
+        # the destination's input connectors under standard semantics).
+        for getter in ("inputIndex", "outputIndex"):
             try:
                 idx = getattr(conn, getter)()
                 if 0 <= idx < len(dst_inputs):
@@ -222,6 +256,12 @@ def export_material(builder):
                    if c.type().name().startswith("redshift::")]
     out_nodes = [c for c in children if c.type().name() in OUTPUT_TYPES]
 
+    for c in children:
+        tname = c.type().name()
+        if not tname.startswith("redshift::") and tname not in OUTPUT_TYPES:
+            warnings.append("non-Redshift node '%s' (%s) is not exported"
+                            % (c.name(), tname))
+
     for i, c in enumerate(rs_children):
         key = "n%d" % i
         key_by_path[c.path()] = key
@@ -235,13 +275,16 @@ def export_material(builder):
 
     for c in rs_children:
         for conn in c.inputConnections():
-            rec = _connection_record(conn, c)
+            rec = _connection_record(conn, c, warnings)
             if rec is None:
                 warnings.append("%s: could not resolve an input connection"
                                 % c.name())
                 continue
             src, src_out, dst_in = rec
             if src.path() not in key_by_path:
+                warnings.append("%s: input '%s' fed by non-exported node "
+                                "'%s' -- connection dropped"
+                                % (c.name(), dst_in, src.name()))
                 continue
             connections.append({
                 "src": key_by_path[src.path()],
@@ -253,11 +296,14 @@ def export_material(builder):
     if out_nodes:
         out = out_nodes[0]
         for conn in out.inputConnections():
-            rec = _connection_record(conn, out)
+            rec = _connection_record(conn, out, warnings)
             if rec is None:
                 continue
             src, _src_out, dst_in = rec
             if src.path() not in key_by_path:
+                warnings.append("material output '%s' fed by non-exported "
+                                "node '%s' -- dropped"
+                                % (dst_in, src.name()))
                 continue
             slot = dst_in.lower()
             for role in ("surface", "displacement", "volume", "environment"):
@@ -297,14 +343,14 @@ def export_material(builder):
 def copy_selected_material():
     try:
         dump_node_classes(verbose=False)
-    except (hou.Error, OSError):
-        pass
+    except (hou.Error, OSError) as e:
+        print("[RS Bridge] note: could not refresh the node inventory (%s)"
+              % e)
     sel = hou.selectedNodes()
     builder = _find_builder(sel[0]) if sel else None
     if builder is None:
-        hou.ui.displayMessage(
-            "Select a Redshift material (redshift_vopnet) first.",
-            severity=hou.severityType.Error)
+        _ui_error("[RS Bridge] Select a Redshift material "
+                  "(redshift_vopnet) first.")
         return None
 
     data = export_material(builder)
@@ -317,10 +363,7 @@ def copy_selected_material():
     print(msg)
     for w in data["warnings"]:
         print("[RS Bridge]   warning: %s" % w)
-    try:
-        hou.ui.setStatusMessage(msg)
-    except hou.Error:
-        pass
+    _ui_status(msg)
     return data
 
 
@@ -336,7 +379,6 @@ def _resolve_parm_name(node, name):
     if name.endswith(".path"):
         cands.append(name[:-len(".path")])
     cands.append(name.replace(".", "_"))
-    cands.append(name.split(".")[-1])
     for c in cands:
         pt = lut.get(c.lower())
         if pt is not None:
@@ -346,19 +388,43 @@ def _resolve_parm_name(node, name):
 
 def _set_parm(pt, value, node_label, warnings):
     vals = value if isinstance(value, list) else [value]
+    if not vals:
+        warnings.append("%s: empty value for parm '%s' -- skipped"
+                        % (node_label, pt.name()))
+        return False
     n = len(pt)
     if len(vals) < n:
-        vals = vals + [vals[-1]] * (n - len(vals))
+        pad = [vals[-1]] * (n - len(vals))
+        if len(vals) == 3 and n == 4:
+            pad = [1.0]  # RGB -> RGBA: alpha defaults to opaque
+        vals = vals + pad
     vals = vals[:n]
     try:
         pt.set(tuple(vals))
         return True
     except (hou.Error, TypeError):
         pass
-    # Type coercion fallbacks (str parm fed a number, menu fed an int...).
-    for conv in (str, float, int):
+    # Typed coercion fallbacks. String parms only accept str -- but feeding
+    # a menu parm the repr of a number would corrupt it silently, so menu
+    # tokens are validated and every coerced set is reported for review.
+    is_string = (pt.parmTemplate().type() == hou.parmTemplateType.String)
+    for conv in ((str,) if is_string else (float, int)):
         try:
-            pt.set(tuple(conv(v) for v in vals))
+            coerced = tuple(conv(v) for v in vals)
+        except (TypeError, ValueError):
+            continue
+        if is_string:
+            try:
+                menu = pt[0].menuItems()
+            except hou.Error:
+                menu = ()
+            if menu and coerced[0] not in menu:
+                break  # not a valid menu token: warn below instead
+        try:
+            pt.set(coerced)
+            warnings.append("%s: parm '%s' set from %r via %s coercion -- "
+                            "verify the value"
+                            % (node_label, pt.name(), value, conv.__name__))
             return True
         except (hou.Error, TypeError, ValueError):
             continue
@@ -374,11 +440,15 @@ def _named_input_index(node, name):
     return None
 
 
-def _named_output_index(node, name):
+def _named_output_index(node, name, warnings=None):
     outs = list(node.outputNames())
     for i, n in enumerate(outs):
         if n.lower() == (name or "").lower():
             return i
+    if warnings is not None and len(outs) > 1:
+        warnings.append("%s: output '%s' not found, assuming first output "
+                        "'%s' -- verify this connection"
+                        % (node.name(), name, outs[0]))
     return 0 if outs else None
 
 
@@ -386,12 +456,16 @@ def import_material(data, dest="/mat"):
     warnings = list(data.get("warnings", []))
     mat = data["material"]
     type_map = _rs_type_map()
+    if not type_map:
+        raise RuntimeError("No Redshift VOP node types found -- is "
+                           "Redshift for Houdini installed and licensed?")
 
     matnet = hou.node(dest)
     if matnet is None:
         raise RuntimeError("Destination network not found: %s" % dest)
 
     safe = re.sub(r"[^A-Za-z0-9_]", "_", mat.get("name") or "rs_bridge_mat")
+    safe = re.sub(r"^(?=\d)", "_", safe)  # node names can't start with a digit
     builder = matnet.createNode("redshift_vopnet", safe)
 
     # Drop the default shading nodes; keep the output collect node.
@@ -415,6 +489,7 @@ def import_material(data, dest="/mat"):
                             "(node '%s' skipped)" % (cls, nd.get("name")))
             continue
         name = re.sub(r"[^A-Za-z0-9_]", "_", nd.get("name") or cls)
+        name = re.sub(r"^(?=\d)", "_", name)
         node = builder.createNode(type_name, name)
         built[nd["key"]] = node
         if nd.get("pos"):
@@ -434,7 +509,7 @@ def import_material(data, dest="/mat"):
         if src is None or dst is None:
             continue
         in_idx = _named_input_index(dst, conn["dst_port"])
-        out_idx = _named_output_index(src, conn.get("src_port"))
+        out_idx = _named_output_index(src, conn.get("src_port"), warnings)
         if in_idx is None or out_idx is None:
             warnings.append("could not connect %s.%s -> %s.%s"
                             % (src.name(), conn.get("src_port"),
@@ -476,10 +551,7 @@ def paste_material(dest="/mat"):
     print(msg)
     for w in warnings:
         print("[RS Bridge]   warning: %s" % w)
-    try:
-        hou.ui.setStatusMessage(msg)
-    except hou.Error:
-        pass
+    _ui_status(msg)
     if warnings:
         print("[RS Bridge] %d warning(s) -- see above." % len(warnings))
     return builder

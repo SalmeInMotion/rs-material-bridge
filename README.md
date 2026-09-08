@@ -94,13 +94,14 @@ Only nodes whose Redshift class exists in *both* apps can travel. Most core
 shading nodes do (same RS library underneath); C4D-native extras (Maxon
 noise, C4D shader wrappers...) don't.
 
-The bridge tells you in three places:
+The bridge tells you in four places:
 
 1. **At copy time**: every Copy dumps the app's real RS node inventory to
    `classes_houdini.json` / `classes_c4d.json` in the bridge directory. Once
    both dumps exist, copying a material that uses a class missing on the
-   other side prints a warning immediately ("does not exist in C4D -- will
-   be skipped on paste") and counts it in the summary dialog.
+   other side warns immediately ("does not exist in C4D -- will be skipped
+   on paste") — C4D counts it in the summary dialog, Houdini prints it to
+   the console.
 2. **At paste time**: any node that could not be recreated is listed in the
    console report, along with every parameter that could not be matched.
 3. **[COMPATIBILITY.md](COMPATIBILITY.md)**: the full three-way list

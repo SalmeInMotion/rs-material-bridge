@@ -66,8 +66,10 @@ def _log(msg):
 def write_clip(data):
     if not os.path.isdir(BRIDGE_DIR):
         os.makedirs(BRIDGE_DIR)
-    with open(CLIP_FILE, "w", encoding="utf-8") as f:
+    tmp = CLIP_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, CLIP_FILE)  # atomic: never a half-written clipboard
 
 
 def read_clip():
@@ -75,10 +77,19 @@ def read_clip():
         raise RuntimeError("Bridge clipboard not found: %s\n"
                            "Copy a material first (from Houdini or C4D)."
                            % CLIP_FILE)
-    with open(CLIP_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(CLIP_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except ValueError:
+        raise RuntimeError("Bridge clipboard is corrupt: %s\n"
+                           "Run Copy again." % CLIP_FILE)
     if data.get("format") != FORMAT_NAME:
         raise RuntimeError("Not a %s file: %s" % (FORMAT_NAME, CLIP_FILE))
+    if data.get("version", 1) > FORMAT_VERSION:
+        raise RuntimeError("Clipboard was written by a newer bridge "
+                           "(format v%s, this side reads v%s). Update the "
+                           "bridge on this side."
+                           % (data.get("version"), FORMAT_VERSION))
     return data
 
 
@@ -384,15 +395,40 @@ def _via_out_list(port, direction):
     return conns
 
 
+def _src_port_dotted(port):
+    """Dotted path of an output port below its owning node (e.g.
+    'outcolor.r'), so nested sub-outputs survive the round-trip. Climbs
+    parents until the node, skipping the ports-root container."""
+    segs = []
+    cur = port
+    for _ in range(12):
+        if cur is None or _is_null(cur):
+            break
+        try:
+            kind = cur.GetKind()
+        except Exception:
+            kind = None
+        if kind == maxon.NODE_KIND.NODE:
+            break
+        if kind is None or kind == getattr(maxon.NODE_KIND, "PORT", kind):
+            segs.append(_last_segment(cur))
+        cur = _try_call(cur, "GetParent")
+    segs.reverse()
+    if segs:
+        return ".".join(segs).lower()
+    return _last_segment(port).lower()
+
+
 _CONN_API_WARNED = [False]
 
 
 def _warn_conn_api_once(warnings):
     if not _CONN_API_WARNED[0]:
         _CONN_API_WARNED[0] = True
-        warnings.append("connection query API returned nothing -- if the "
-                        "material has connected nodes, send the console "
-                        "output to iterate on GetConnections signature")
+        warnings.append("no connections found -- either this material has "
+                        "none, or this C4D build's connection API is "
+                        "unsupported (if nodes ARE wired, please report "
+                        "this with the console output)")
 
 
 # ---------------------------------------------------------------------------
@@ -400,10 +436,22 @@ def _warn_conn_api_once(warnings):
 # ---------------------------------------------------------------------------
 
 def _url_from_path(path):
-    p = str(path).replace("\\", "/")
-    if not p.lower().startswith("file:"):
-        p = "file:///" + p.lstrip("/")
-    return maxon.Url(p)
+    s = str(path)
+    if s.lower().startswith(("file:", "asset:", "http:", "https:")):
+        return maxon.Url(s)
+    # SetSystemPath handles UNC shares, relative paths and characters that
+    # a URL string would misparse (#, %, spaces).
+    try:
+        u = maxon.Url()
+        u.SetSystemPath(maxon.String(s))
+        if str(u):
+            return u
+    except Exception:
+        pass
+    p = s.replace("\\", "/")
+    if p.startswith("//"):
+        return maxon.Url("file:" + p)  # UNC: keep the server part intact
+    return maxon.Url("file:///" + p.lstrip("/"))
 
 
 def to_jsonable(v):
@@ -416,7 +464,9 @@ def to_jsonable(v):
         try:
             s = v.GetSystemPath()
         except Exception:
-            s = str(v)
+            s = None
+        if not s:
+            s = str(v)  # asset:/// etc.: keep the raw URL rather than drop
         return s or None
     # maxon scalar/string wrappers (maxon.String, maxon.Int32, ...) are not
     # subclasses of the Python types, so isinstance() above misses them.
@@ -438,7 +488,7 @@ def to_jsonable(v):
                 break
     # InternedId / Id / enums-as-ids
     s = str(v)
-    if re.match(r"^[a-z0-9_.]+$", s) and "." in s:
+    if re.match(r"^[A-Za-z0-9_.]+$", s) and "." in s:
         return s
     try:
         return float(v)
@@ -453,10 +503,12 @@ def convert_like(current, value):
             isinstance(value, str) and isinstance(current, maxon.Url)):
         return _url_from_path(value)
     if isinstance(current, bool):
-        return bool(value)
+        if isinstance(value, (bool, int, float)):
+            return bool(value)
+        return value  # let the port write fail loudly rather than guess
     if isinstance(current, int) and not isinstance(current, bool):
         try:
-            return int(value)
+            return int(round(float(value)))
         except (TypeError, ValueError):
             return value
     if isinstance(current, float):
@@ -474,6 +526,8 @@ def convert_like(current, value):
             return str(value)
     t = type(current)
     if isinstance(value, (list, tuple)):
+        if len(value) == 3 and hasattr(current, "a"):
+            value = list(value) + [1.0]  # RGB -> RGBA: opaque, not invisible
         for n in (len(value), 4, 3, 2):
             try:
                 return t(*[float(x) for x in value[:n]])
@@ -520,6 +574,12 @@ def export_material(mat):
             continue
         exportable.append((node, aid))
 
+    if not exportable and len(all_nodes) > (1 if out_node is not None
+                                            else 0):
+        raise RuntimeError("could not identify any shader node in the "
+                           "graph (asset id API mismatch?) -- please "
+                           "report this with your C4D/Redshift versions")
+
     got_any_connection = [False]
 
     for i, (node, aid) in enumerate(exportable):
@@ -527,6 +587,7 @@ def export_material(mat):
         keys[str(node.GetId())] = key
         cls = aid.split(".")[-1]
         params = {}
+        unserializable = []
         inputs = _try_call(node, "GetInputs")
         if inputs is not None and not _is_null(inputs):
             for parts, port, is_leaf in walk_ports(inputs):
@@ -544,21 +605,31 @@ def export_material(mat):
                         connections.append({
                             "_dst_gid": str(node.GetId()),
                             "_src_gid": str(src_node.GetId()),
-                            "src_port": _last_segment(src_port).lower(),
+                            "src_port": _src_port_dotted(src_port),
                             "dst_port": dotted.lower(),
                         })
                     continue
                 if not is_leaf:
                     continue
-                val = to_jsonable(_port_value(port))
+                raw = _port_value(port)
+                val = to_jsonable(raw)
                 if val is None:
+                    if raw is not None:
+                        unserializable.append(dotted)
                     continue
                 params[dotted.lower()] = val
+        nname = node_display_name(node)
+        if unserializable:
+            shown = ", ".join(unserializable[:6])
+            if len(unserializable) > 6:
+                shown += ", ... (%d total)" % len(unserializable)
+            warnings.append("%s: value(s) not serializable, skipped: %s"
+                            % (nname, shown))
         nodes_json.append({
             "key": key,
             "class": cls,
             "c4d_id": aid,
-            "name": node_display_name(node),
+            "name": nname,
             "params": params,
         })
 
@@ -659,10 +730,15 @@ def import_material(data, doc):
             default_nodes.append(node)
 
     built = {}
+    wired = 0
     with graph.BeginTransaction() as txn:
         for node in default_nodes:
-            if not _try_call(node, "Remove"):
-                pass  # orphan default node is harmless
+            try:
+                node.Remove()
+            except Exception as e:
+                warnings.append("could not remove a default graph node "
+                                "(%s) -- it may stay wired to the Output"
+                                % e)
 
         for nd in mat_json["nodes"]:
             aid = _class_to_asset_id(nd)
@@ -706,15 +782,27 @@ def import_material(data, doc):
             src = built.get(conn["src"])
             dst = built.get(conn["dst"])
             if src is None or dst is None:
+                warnings.append("connection %s.%s -> %s.%s dropped (its "
+                                "node was not created)"
+                                % (conn.get("src"), conn.get("src_port"),
+                                   conn.get("dst"), conn.get("dst_port")))
                 continue
             src_outs = _try_call(src, "GetOutputs")
             dst_ins = _try_call(dst, "GetInputs")
             if src_outs is None or dst_ins is None:
                 continue
-            src_port = find_port(src_outs, conn.get("src_port") or "")
+            wanted = conn.get("src_port") or ""
+            src_port = find_port(src_outs, wanted)
             if src_port is None:
-                leaves = [p for _, p, leaf in walk_ports(src_outs) if leaf]
-                src_port = leaves[0] if leaves else None
+                leaves = [(p_parts, p) for p_parts, p, leaf
+                          in walk_ports(src_outs) if leaf]
+                if leaves:
+                    src_port = leaves[0][1]
+                    if wanted and len(leaves) > 1:
+                        warnings.append(
+                            "source port '%s' not found, connected first "
+                            "output '%s' instead -- verify this wire"
+                            % (wanted, ".".join(leaves[0][0])))
             dst_port = find_port(dst_ins, conn["dst_port"])
             if src_port is None or dst_port is None:
                 warnings.append("could not connect %s.%s -> %s.%s"
@@ -723,15 +811,23 @@ def import_material(data, doc):
                 continue
             try:
                 src_port.Connect(dst_port)
+                wired += 1
             except Exception as e:
                 warnings.append("Connect failed %s -> %s: %s"
                                 % (conn.get("src_port"), conn["dst_port"], e))
 
         if out_node is not None:
             out_ins = _try_call(out_node, "GetInputs")
-            for role, key in (mat_json.get("outputs") or {}).items():
+            outputs_json = mat_json.get("outputs") or {}
+            if not outputs_json:
+                warnings.append("clipboard carries no output wiring -- "
+                                "nothing is connected to the Output node")
+            for role, key in outputs_json.items():
                 src = built.get(key)
                 if src is None or out_ins is None:
+                    warnings.append("could not wire material output '%s' "
+                                    "(its source node was not created)"
+                                    % role)
                     continue
                 dst_port = None
                 for parts, port, _leaf in walk_ports(out_ins):
@@ -755,9 +851,15 @@ def import_material(data, doc):
 
         txn.Commit()
 
+    doc.StartUndo()
     doc.InsertMaterial(mat)
+    doc.AddUndo(c4d.UNDOTYPE_NEWOBJ, mat)
+    doc.EndUndo()
     c4d.EventAdd()
-    return mat, warnings
+    stats = {"nodes": len(built), "nodes_total": len(mat_json["nodes"]),
+             "connections": wired,
+             "connections_total": len(mat_json.get("connections", []))}
+    return mat, warnings, stats
 
 
 # ---------------------------------------------------------------------------
@@ -770,12 +872,16 @@ def run_copy():
     except Exception:
         pass  # inventory is a nice-to-have; never block the copy
     doc = c4d.documents.GetActiveDocument()
-    mat = doc.GetActiveMaterial()
+    mats = _try_call(doc, "GetActiveMaterials") or []
+    mat = mats[0] if mats else doc.GetActiveMaterial()
     if mat is None:
         gui.MessageDialog("Select a Redshift node material first.")
         return
     try:
         data = export_material(mat)
+        if len(mats) > 1:
+            data["warnings"].append("%d materials selected -- copied only "
+                                    "'%s'" % (len(mats), mat.GetName()))
     except Exception as e:
         traceback.print_exc()
         gui.MessageDialog("Copy failed:\n%s\n\nDetails in the Console." % e)
@@ -799,16 +905,20 @@ def run_paste():
     doc = c4d.documents.GetActiveDocument()
     try:
         data = read_clip()
-        mat, warnings = import_material(data, doc)
+        mat, warnings, stats = import_material(data, doc)
     except Exception as e:
         traceback.print_exc()
         gui.MessageDialog("Paste failed:\n%s\n\nDetails in the Console." % e)
         return
-    _log("Pasted '%s' (from %s)"
-         % (mat.GetName(), data.get("source_app")))
+    _log("Pasted '%s' (from %s, bridge %s)"
+         % (mat.GetName(), data.get("source_app"),
+            data.get("tool_version", "?")))
     for w in warnings:
         _log("  warning: %s" % w)
     gui.MessageDialog(
-        "Pasted material '%s' (exported from %s).\n\nWarnings: %d%s"
-        % (mat.GetName(), data.get("source_app", "?"), len(warnings),
+        "Pasted material '%s' (exported from %s).\n\n"
+        "Nodes: %d of %d\nConnections: %d of %d\nWarnings: %d%s"
+        % (mat.GetName(), data.get("source_app", "?"),
+           stats["nodes"], stats["nodes_total"],
+           stats["connections"], stats["connections_total"], len(warnings),
            "\n\nSee the Console for warning details." if warnings else ""))

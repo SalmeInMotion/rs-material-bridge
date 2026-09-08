@@ -96,7 +96,8 @@ def _fmt_c4d_version(v):
     return "%s.%s" % (s[:4], s[4]) if len(s) >= 5 else s
 
 
-PAGE = """<title>RS Material Bridge — Node Compatibility</title>
+PAGE = """<meta charset="utf-8">
+<title>RS Material Bridge — Node Compatibility</title>
 <style>
 :root{
   --bg:#f6f4f1; --surface:#ffffff; --ink:#23201d; --muted:#71685f;

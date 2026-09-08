@@ -1,0 +1,306 @@
+<title>RS Material Bridge — Node Compatibility</title>
+<style>
+:root{
+  --bg:#f6f4f1; --surface:#ffffff; --ink:#23201d; --muted:#71685f;
+  --line:#e5ded6; --accent:#d04a27;
+  --ok:#2e8f5b; --warn:#b57a1c; --bad:#c23b3b;
+  --mono:ui-monospace,"Cascadia Code",Consolas,"SF Mono",Menlo,monospace;
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#17130f; --surface:#211c16; --ink:#ece6dd; --muted:#9d9186;
+  --line:#383128; --accent:#f06a41;
+  --ok:#4ec98a; --warn:#e0a23e; --bad:#e46060;
+}}
+:root[data-theme="dark"]{
+  --bg:#17130f; --surface:#211c16; --ink:#ece6dd; --muted:#9d9186;
+  --line:#383128; --accent:#f06a41;
+  --ok:#4ec98a; --warn:#e0a23e; --bad:#e46060;
+}
+:root[data-theme="light"]{
+  --bg:#f6f4f1; --surface:#ffffff; --ink:#23201d; --muted:#71685f;
+  --line:#e5ded6; --accent:#d04a27;
+  --ok:#2e8f5b; --warn:#b57a1c; --bad:#c23b3b;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans)}
+.wrap{max-width:1080px;margin:0 auto;padding:36px 24px 72px}
+.eyebrow{font:600 11px/1 var(--mono);letter-spacing:.18em;color:var(--accent);
+  text-transform:uppercase;margin:0}
+h1{font-size:clamp(26px,4vw,34px);font-weight:650;letter-spacing:-.02em;
+  text-wrap:balance;margin:10px 0 10px}
+.sub{color:var(--muted);max-width:64ch;margin:0 0 6px}
+.meta{font:12.5px/1.6 var(--mono);color:var(--muted);margin:0}
+.controls{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;
+  gap:10px;align-items:center;padding:14px 0;margin-top:22px;
+  background:var(--bg);border-bottom:1px solid var(--line)}
+#q{flex:1 1 230px;padding:9px 13px;border:1px solid var(--line);
+  border-radius:8px;background:var(--surface);color:var(--ink);
+  font:14px var(--sans)}
+#q:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.fbtn{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;
+  border:1px solid var(--line);border-radius:999px;background:var(--surface);
+  color:var(--ink);font:500 13px/1 var(--sans);cursor:pointer}
+.fbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.fbtn[aria-pressed="true"]{border-color:var(--accent);
+  box-shadow:inset 0 0 0 1px var(--accent)}
+.fbtn .n{font-family:var(--mono);font-variant-numeric:tabular-nums;
+  color:var(--muted);font-size:12px}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.st-ok{background:var(--ok)} .st-partial{background:var(--warn)}
+.st-c4d,.st-hou{background:var(--bad)}
+#shown{font:12.5px var(--mono);font-variant-numeric:tabular-nums;
+  color:var(--muted);margin-left:auto}
+main section h2{display:flex;align-items:baseline;gap:9px;
+  font:600 12px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);margin:30px 0 11px}
+main section h2 .n{font-weight:500;font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:8px;
+  font:500 12.5px/1 var(--mono);padding:8px 11px;border:1px solid var(--line);
+  border-radius:7px;background:var(--surface)}
+.chip.has-note{border-style:dashed;cursor:help}
+.hidden{display:none}
+.notes{margin-top:44px;border-top:1px solid var(--line);padding-top:20px}
+.notes h2{font:600 12px var(--mono);letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+.notes ul{margin:0;padding:0;list-style:none;display:grid;gap:9px}
+.notes li{max-width:78ch}
+.notes .nm{font:600 12.5px var(--mono)}
+footer{margin-top:48px;color:var(--muted);font:12.5px/1.7 var(--mono)}
+footer code{color:var(--ink)}
+@media (prefers-reduced-motion: no-preference){
+  .chip,.fbtn{transition:border-color .15s}
+}
+</style>
+<div class="wrap">
+<header>
+  <p class="eyebrow">RS Material Bridge</p>
+  <h1>Node compatibility guide</h1>
+  <p class="sub">Which Redshift nodes survive the copy/paste trip between
+  Houdini and Cinema 4D. Built from the real node inventories of both
+  installs — not from documentation.</p>
+  <p class="meta">Houdini 21.0.700 · Cinema 4D 2024.4 · 162 node classes compared</p>
+</header>
+<div class="controls">
+  <input id="q" type="search" placeholder="Search nodes…"
+         aria-label="Search nodes">
+  <button class="fbtn" data-f="all" aria-pressed="true">All <span class="n">162</span></button>
+  <button class="fbtn" data-f="ok" aria-pressed="false"><i class="dot st-ok"></i>Portable <span class="n">155</span></button>
+  <button class="fbtn" data-f="partial" aria-pressed="false"><i class="dot st-partial"></i>Partial <span class="n">3</span></button>
+  <button class="fbtn" data-f="c4d" aria-pressed="false"><i class="dot st-c4d"></i>C4D only <span class="n">2</span></button>
+  <button class="fbtn" data-f="hou" aria-pressed="false"><i class="dot st-hou"></i>Houdini only <span class="n">2</span></button>
+  <span id="shown"></span>
+</div>
+<main>
+<section><h2>Materials <span class="n">18</span></h2><div class="chips"><span class="chip" data-st="ok" data-name="architectural"><i class="dot st-ok"></i>architectural</span>
+<span class="chip" data-st="ok" data-name="carpaint"><i class="dot st-ok"></i>carpaint</span>
+<span class="chip" data-st="ok" data-name="hair"><i class="dot st-ok"></i>hair</span>
+<span class="chip" data-st="ok" data-name="hair2"><i class="dot st-ok"></i>hair2</span>
+<span class="chip" data-st="ok" data-name="incandescent"><i class="dot st-ok"></i>incandescent</span>
+<span class="chip" data-st="ok" data-name="material"><i class="dot st-ok"></i>material</span>
+<span class="chip" data-st="ok" data-name="materialblender"><i class="dot st-ok"></i>materialblender</span>
+<span class="chip" data-st="ok" data-name="materiallayer"><i class="dot st-ok"></i>materiallayer</span>
+<span class="chip" data-st="ok" data-name="matteshadow"><i class="dot st-ok"></i>matteshadow</span>
+<span class="chip" data-st="ok" data-name="openpbrmaterial"><i class="dot st-ok"></i>openpbrmaterial</span>
+<span class="chip" data-st="ok" data-name="randomizedmaterialswitch"><i class="dot st-ok"></i>randomizedmaterialswitch</span>
+<span class="chip" data-st="ok" data-name="skin"><i class="dot st-ok"></i>skin</span>
+<span class="chip" data-st="ok" data-name="sprite"><i class="dot st-ok"></i>sprite</span>
+<span class="chip" data-st="ok" data-name="standardmaterial"><i class="dot st-ok"></i>standardmaterial</span>
+<span class="chip" data-st="ok" data-name="standardvolume"><i class="dot st-ok"></i>standardvolume</span>
+<span class="chip" data-st="ok" data-name="subsurfacescatter"><i class="dot st-ok"></i>subsurfacescatter</span>
+<span class="chip" data-st="ok" data-name="toonmaterial"><i class="dot st-ok"></i>toonmaterial</span>
+<span class="chip" data-st="ok" data-name="volume"><i class="dot st-ok"></i>volume</span></div></section>
+<section><h2>Ramps &amp; Gradients <span class="n">2</span></h2><div class="chips"><span class="chip has-note" data-st="partial" data-name="rsramp" title="node travels, but ramp/curve knot values are not carried in v1 (reset to defaults on paste)"><i class="dot st-partial"></i>rsramp</span>
+<span class="chip has-note" data-st="partial" data-name="rsscalarramp" title="node travels, but ramp/curve knot values are not carried in v1 (reset to defaults on paste)"><i class="dot st-partial"></i>rsscalarramp</span></div></section>
+<section><h2>AOV <span class="n">3</span></h2><div class="chips"><span class="chip" data-st="ok" data-name="storecolortoaov"><i class="dot st-ok"></i>storecolortoaov</span>
+<span class="chip" data-st="ok" data-name="storeintegertoaov"><i class="dot st-ok"></i>storeintegertoaov</span>
+<span class="chip" data-st="ok" data-name="storescalartoaov"><i class="dot st-ok"></i>storescalartoaov</span></div></section>
+<section><h2>Math <span class="n">70</span></h2><div class="chips"><span class="chip" data-st="ok" data-name="rsmathabs"><i class="dot st-ok"></i>rsmathabs</span>
+<span class="chip" data-st="ok" data-name="rsmathabscolor"><i class="dot st-ok"></i>rsmathabscolor</span>
+<span class="chip" data-st="ok" data-name="rsmathabsvector"><i class="dot st-ok"></i>rsmathabsvector</span>
+<span class="chip" data-st="ok" data-name="rsmathacos"><i class="dot st-ok"></i>rsmathacos</span>
+<span class="chip" data-st="ok" data-name="rsmathadd"><i class="dot st-ok"></i>rsmathadd</span>
+<span class="chip" data-st="ok" data-name="rsmathaddvector"><i class="dot st-ok"></i>rsmathaddvector</span>
+<span class="chip" data-st="ok" data-name="rsmathasin"><i class="dot st-ok"></i>rsmathasin</span>
+<span class="chip" data-st="ok" data-name="rsmathatan"><i class="dot st-ok"></i>rsmathatan</span>
+<span class="chip" data-st="ok" data-name="rsmathatan2"><i class="dot st-ok"></i>rsmathatan2</span>
+<span class="chip" data-st="ok" data-name="rsmathbias"><i class="dot st-ok"></i>rsmathbias</span>
+<span class="chip" data-st="ok" data-name="rsmathbiascolor"><i class="dot st-ok"></i>rsmathbiascolor</span>
+<span class="chip" data-st="ok" data-name="rsmathbiasvector"><i class="dot st-ok"></i>rsmathbiasvector</span>
+<span class="chip" data-st="ok" data-name="rsmathcos"><i class="dot st-ok"></i>rsmathcos</span>
+<span class="chip" data-st="ok" data-name="rsmathcrossvector"><i class="dot st-ok"></i>rsmathcrossvector</span>
+<span class="chip" data-st="ok" data-name="rsmathdiv"><i class="dot st-ok"></i>rsmathdiv</span>
+<span class="chip" data-st="ok" data-name="rsmathdivvector"><i class="dot st-ok"></i>rsmathdivvector</span>
+<span class="chip" data-st="ok" data-name="rsmathdotvector"><i class="dot st-ok"></i>rsmathdotvector</span>
+<span class="chip" data-st="ok" data-name="rsmathexp"><i class="dot st-ok"></i>rsmathexp</span>
+<span class="chip" data-st="ok" data-name="rsmathexpcolor"><i class="dot st-ok"></i>rsmathexpcolor</span>
+<span class="chip" data-st="ok" data-name="rsmathexpvector"><i class="dot st-ok"></i>rsmathexpvector</span>
+<span class="chip" data-st="ok" data-name="rsmathfloor"><i class="dot st-ok"></i>rsmathfloor</span>
+<span class="chip" data-st="ok" data-name="rsmathfloorvector"><i class="dot st-ok"></i>rsmathfloorvector</span>
+<span class="chip" data-st="ok" data-name="rsmathfrac"><i class="dot st-ok"></i>rsmathfrac</span>
+<span class="chip" data-st="ok" data-name="rsmathfracvector"><i class="dot st-ok"></i>rsmathfracvector</span>
+<span class="chip" data-st="ok" data-name="rsmathgain"><i class="dot st-ok"></i>rsmathgain</span>
+<span class="chip" data-st="ok" data-name="rsmathgaincolor"><i class="dot st-ok"></i>rsmathgaincolor</span>
+<span class="chip" data-st="ok" data-name="rsmathgainvector"><i class="dot st-ok"></i>rsmathgainvector</span>
+<span class="chip" data-st="ok" data-name="rsmathinv"><i class="dot st-ok"></i>rsmathinv</span>
+<span class="chip" data-st="ok" data-name="rsmathinvcolor"><i class="dot st-ok"></i>rsmathinvcolor</span>
+<span class="chip" data-st="ok" data-name="rsmathinvvector"><i class="dot st-ok"></i>rsmathinvvector</span>
+<span class="chip" data-st="ok" data-name="rsmathlengthvector"><i class="dot st-ok"></i>rsmathlengthvector</span>
+<span class="chip" data-st="ok" data-name="rsmathln"><i class="dot st-ok"></i>rsmathln</span>
+<span class="chip" data-st="ok" data-name="rsmathlnvector"><i class="dot st-ok"></i>rsmathlnvector</span>
+<span class="chip" data-st="ok" data-name="rsmathlog"><i class="dot st-ok"></i>rsmathlog</span>
+<span class="chip" data-st="ok" data-name="rsmathlogvector"><i class="dot st-ok"></i>rsmathlogvector</span>
+<span class="chip" data-st="ok" data-name="rsmathmax"><i class="dot st-ok"></i>rsmathmax</span>
+<span class="chip" data-st="ok" data-name="rsmathmaxvector"><i class="dot st-ok"></i>rsmathmaxvector</span>
+<span class="chip" data-st="ok" data-name="rsmathmin"><i class="dot st-ok"></i>rsmathmin</span>
+<span class="chip" data-st="ok" data-name="rsmathminvector"><i class="dot st-ok"></i>rsmathminvector</span>
+<span class="chip" data-st="ok" data-name="rsmathmix"><i class="dot st-ok"></i>rsmathmix</span>
+<span class="chip" data-st="ok" data-name="rsmathmixvector"><i class="dot st-ok"></i>rsmathmixvector</span>
+<span class="chip" data-st="ok" data-name="rsmathmod"><i class="dot st-ok"></i>rsmathmod</span>
+<span class="chip" data-st="ok" data-name="rsmathmodvector"><i class="dot st-ok"></i>rsmathmodvector</span>
+<span class="chip" data-st="ok" data-name="rsmathmul"><i class="dot st-ok"></i>rsmathmul</span>
+<span class="chip" data-st="ok" data-name="rsmathmulvector"><i class="dot st-ok"></i>rsmathmulvector</span>
+<span class="chip" data-st="ok" data-name="rsmathneg"><i class="dot st-ok"></i>rsmathneg</span>
+<span class="chip" data-st="ok" data-name="rsmathnegvector"><i class="dot st-ok"></i>rsmathnegvector</span>
+<span class="chip" data-st="ok" data-name="rsmathnormalizevector"><i class="dot st-ok"></i>rsmathnormalizevector</span>
+<span class="chip" data-st="ok" data-name="rsmathpow"><i class="dot st-ok"></i>rsmathpow</span>
+<span class="chip" data-st="ok" data-name="rsmathpowvector"><i class="dot st-ok"></i>rsmathpowvector</span>
+<span class="chip" data-st="ok" data-name="rsmathrange"><i class="dot st-ok"></i>rsmathrange</span>
+<span class="chip" data-st="ok" data-name="rsmathrangevector"><i class="dot st-ok"></i>rsmathrangevector</span>
+<span class="chip" data-st="ok" data-name="rsmathrcp"><i class="dot st-ok"></i>rsmathrcp</span>
+<span class="chip" data-st="ok" data-name="rsmathrcpvector"><i class="dot st-ok"></i>rsmathrcpvector</span>
+<span class="chip" data-st="ok" data-name="rsmathsaturate"><i class="dot st-ok"></i>rsmathsaturate</span>
+<span class="chip" data-st="ok" data-name="rsmathsaturatecolor"><i class="dot st-ok"></i>rsmathsaturatecolor</span>
+<span class="chip" data-st="ok" data-name="rsmathsaturatevector"><i class="dot st-ok"></i>rsmathsaturatevector</span>
+<span class="chip" data-st="ok" data-name="rsmathsign"><i class="dot st-ok"></i>rsmathsign</span>
+<span class="chip" data-st="ok" data-name="rsmathsignvector"><i class="dot st-ok"></i>rsmathsignvector</span>
+<span class="chip" data-st="ok" data-name="rsmathsin"><i class="dot st-ok"></i>rsmathsin</span>
+<span class="chip" data-st="ok" data-name="rsmathsqrt"><i class="dot st-ok"></i>rsmathsqrt</span>
+<span class="chip" data-st="ok" data-name="rsmathsqrtvector"><i class="dot st-ok"></i>rsmathsqrtvector</span>
+<span class="chip" data-st="ok" data-name="rsmathsub"><i class="dot st-ok"></i>rsmathsub</span>
+<span class="chip" data-st="ok" data-name="rsmathsubcolor"><i class="dot st-ok"></i>rsmathsubcolor</span>
+<span class="chip" data-st="ok" data-name="rsmathsubvector"><i class="dot st-ok"></i>rsmathsubvector</span>
+<span class="chip" data-st="ok" data-name="rsmathtan"><i class="dot st-ok"></i>rsmathtan</span>
+<span class="chip" data-st="ok" data-name="rsscalarconstant"><i class="dot st-ok"></i>rsscalarconstant</span>
+<span class="chip" data-st="ok" data-name="rsvectormaker"><i class="dot st-ok"></i>rsvectormaker</span>
+<span class="chip" data-st="ok" data-name="rsvectortoscalars"><i class="dot st-ok"></i>rsvectortoscalars</span>
+<span class="chip" data-st="ok" data-name="unitconversion"><i class="dot st-ok"></i>unitconversion</span></div></section>
+<section><h2>Color <span class="n">12</span></h2><div class="chips"><span class="chip" data-st="ok" data-name="iortometaltints"><i class="dot st-ok"></i>iortometaltints</span>
+<span class="chip" data-st="ok" data-name="rscolor2hsv"><i class="dot st-ok"></i>rscolor2hsv</span>
+<span class="chip" data-st="ok" data-name="rscolorcomposite"><i class="dot st-ok"></i>rscolorcomposite</span>
+<span class="chip" data-st="ok" data-name="rscolorconstant"><i class="dot st-ok"></i>rscolorconstant</span>
+<span class="chip" data-st="ok" data-name="rscolorcorrection"><i class="dot st-ok"></i>rscolorcorrection</span>
+<span class="chip" data-st="ok" data-name="rscolorlayer"><i class="dot st-ok"></i>rscolorlayer</span>
+<span class="chip" data-st="ok" data-name="rscolormaker"><i class="dot st-ok"></i>rscolormaker</span>
+<span class="chip" data-st="ok" data-name="rscolormix"><i class="dot st-ok"></i>rscolormix</span>
+<span class="chip" data-st="ok" data-name="rscolorrange"><i class="dot st-ok"></i>rscolorrange</span>
+<span class="chip" data-st="ok" data-name="rscolorsplitter"><i class="dot st-ok"></i>rscolorsplitter</span>
+<span class="chip" data-st="ok" data-name="rshsv2color"><i class="dot st-ok"></i>rshsv2color</span>
+<span class="chip" data-st="ok" data-name="tonemappattern"><i class="dot st-ok"></i>tonemappattern</span></div></section>
+<section><h2>Attributes &amp; User Data <span class="n">15</span></h2><div class="chips"><span class="chip has-note" data-st="c4d" data-name="c4dhairattribute" title="C4D-only node: it has no Houdini counterpart and is skipped when pasting in Houdini."><i class="dot st-c4d"></i>c4dhairattribute</span>
+<span class="chip" data-st="ok" data-name="golaemhsl"><i class="dot st-ok"></i>golaemhsl</span>
+<span class="chip" data-st="ok" data-name="hairrandomcolor"><i class="dot st-ok"></i>hairrandomcolor</span>
+<span class="chip" data-st="ok" data-name="particleattributelookup"><i class="dot st-ok"></i>particleattributelookup</span>
+<span class="chip" data-st="ok" data-name="rshairposition"><i class="dot st-ok"></i>rshairposition</span>
+<span class="chip" data-st="ok" data-name="rsuserdatacolor"><i class="dot st-ok"></i>rsuserdatacolor</span>
+<span class="chip" data-st="ok" data-name="rsuserdatainteger"><i class="dot st-ok"></i>rsuserdatainteger</span>
+<span class="chip" data-st="ok" data-name="rsuserdatascalar"><i class="dot st-ok"></i>rsuserdatascalar</span>
+<span class="chip" data-st="ok" data-name="rsuserdatastring"><i class="dot st-ok"></i>rsuserdatastring</span>
+<span class="chip" data-st="ok" data-name="rsuserdatavector"><i class="dot st-ok"></i>rsuserdatavector</span>
+<span class="chip" data-st="ok" data-name="state"><i class="dot st-ok"></i>state</span>
+<span class="chip" data-st="ok" data-name="surfacetangent"><i class="dot st-ok"></i>surfacetangent</span>
+<span class="chip" data-st="ok" data-name="vertexattributelookup"><i class="dot st-ok"></i>vertexattributelookup</span>
+<span class="chip" data-st="ok" data-name="volumecolorattribute"><i class="dot st-ok"></i>volumecolorattribute</span>
+<span class="chip" data-st="ok" data-name="volumescalarattribute"><i class="dot st-ok"></i>volumescalarattribute</span></div></section>
+<section><h2>Lights &amp; Environment <span class="n">9</span></h2><div class="chips"><span class="chip" data-st="ok" data-name="environment"><i class="dot st-ok"></i>environment</span>
+<span class="chip" data-st="ok" data-name="envswitch"><i class="dot st-ok"></i>envswitch</span>
+<span class="chip" data-st="ok" data-name="light"><i class="dot st-ok"></i>light</span>
+<span class="chip" data-st="ok" data-name="light_dome"><i class="dot st-ok"></i>light_dome</span>
+<span class="chip" data-st="ok" data-name="light_ies"><i class="dot st-ok"></i>light_ies</span>
+<span class="chip" data-st="ok" data-name="light_portal"><i class="dot st-ok"></i>light_portal</span>
+<span class="chip" data-st="ok" data-name="physicalnightsky"><i class="dot st-ok"></i>physicalnightsky</span>
+<span class="chip" data-st="ok" data-name="physicalsky"><i class="dot st-ok"></i>physicalsky</span>
+<span class="chip" data-st="ok" data-name="physicalsun"><i class="dot st-ok"></i>physicalsun</span></div></section>
+<section><h2>Bump &amp; Displacement <span class="n">6</span></h2><div class="chips"><span class="chip" data-st="ok" data-name="bumpblender"><i class="dot st-ok"></i>bumpblender</span>
+<span class="chip" data-st="ok" data-name="bumpmap"><i class="dot st-ok"></i>bumpmap</span>
+<span class="chip" data-st="ok" data-name="displacement"><i class="dot st-ok"></i>displacement</span>
+<span class="chip" data-st="ok" data-name="displacementblender"><i class="dot st-ok"></i>displacementblender</span>
+<span class="chip" data-st="ok" data-name="normalmap"><i class="dot st-ok"></i>normalmap</span>
+<span class="chip" data-st="ok" data-name="roundcorners"><i class="dot st-ok"></i>roundcorners</span></div></section>
+<section><h2>UV &amp; Projection <span class="n">4</span></h2><div class="chips"><span class="chip" data-st="ok" data-name="cameramap"><i class="dot st-ok"></i>cameramap</span>
+<span class="chip" data-st="ok" data-name="triplanar"><i class="dot st-ok"></i>triplanar</span>
+<span class="chip" data-st="ok" data-name="uvcontextprojection"><i class="dot st-ok"></i>uvcontextprojection</span>
+<span class="chip" data-st="ok" data-name="uvprojection"><i class="dot st-ok"></i>uvprojection</span></div></section>
+<section><h2>Switches &amp; Logic <span class="n">6</span></h2><div class="chips"><span class="chip" data-st="ok" data-name="randomizedcolorswitch"><i class="dot st-ok"></i>randomizedcolorswitch</span>
+<span class="chip" data-st="ok" data-name="rayswitch"><i class="dot st-ok"></i>rayswitch</span>
+<span class="chip has-note" data-st="c4d" data-name="reference" title="C4D-only node: it has no Houdini counterpart and is skipped when pasting in Houdini."><i class="dot st-c4d"></i>reference</span>
+<span class="chip" data-st="ok" data-name="rsshaderswitch"><i class="dot st-ok"></i>rsshaderswitch</span>
+<span class="chip has-note" data-st="hou" data-name="shadermerge" title="Houdini-only node: it has no C4D counterpart and is skipped when pasting in C4D."><i class="dot st-hou"></i>shadermerge</span>
+<span class="chip has-note" data-st="hou" data-name="vopswitch" title="Houdini-only node: it has no C4D counterpart and is skipped when pasting in C4D."><i class="dot st-hou"></i>vopswitch</span></div></section>
+<section><h2>Textures &amp; Patterns <span class="n">15</span></h2><div class="chips"><span class="chip" data-st="ok" data-name="ambientocclusion"><i class="dot st-ok"></i>ambientocclusion</span>
+<span class="chip" data-st="ok" data-name="brick"><i class="dot st-ok"></i>brick</span>
+<span class="chip" data-st="ok" data-name="curvature"><i class="dot st-ok"></i>curvature</span>
+<span class="chip" data-st="ok" data-name="distance"><i class="dot st-ok"></i>distance</span>
+<span class="chip" data-st="ok" data-name="distorter"><i class="dot st-ok"></i>distorter</span>
+<span class="chip" data-st="ok" data-name="flakes"><i class="dot st-ok"></i>flakes</span>
+<span class="chip" data-st="ok" data-name="fresnel"><i class="dot st-ok"></i>fresnel</span>
+<span class="chip" data-st="ok" data-name="jitter"><i class="dot st-ok"></i>jitter</span>
+<span class="chip" data-st="ok" data-name="matcap"><i class="dot st-ok"></i>matcap</span>
+<span class="chip" data-st="ok" data-name="maxonnoise"><i class="dot st-ok"></i>maxonnoise</span>
+<span class="chip" data-st="ok" data-name="pavement"><i class="dot st-ok"></i>pavement</span>
+<span class="chip" data-st="ok" data-name="rsnoise"><i class="dot st-ok"></i>rsnoise</span>
+<span class="chip" data-st="ok" data-name="texturesampler"><i class="dot st-ok"></i>texturesampler</span>
+<span class="chip" data-st="ok" data-name="tiles"><i class="dot st-ok"></i>tiles</span>
+<span class="chip" data-st="ok" data-name="wireframe"><i class="dot st-ok"></i>wireframe</span></div></section>
+<section><h2>OSL &amp; Code <span class="n">1</span></h2><div class="chips"><span class="chip has-note" data-st="partial" data-name="osl rsosl" title="aliased to Houdini&#x27;s `rsosl`; the OSL source travels best-effort, dynamically created ports may not"><i class="dot st-partial"></i>osl / rsosl</span></div></section>
+<section><h2>Other Utilities <span class="n">1</span></h2><div class="chips"><span class="chip" data-st="ok" data-name="contour"><i class="dot st-ok"></i>contour</span></div></section>
+</main>
+<section class="notes">
+  <h2>Notes</h2>
+  <ul>
+    <li><span class="nm st">c4dhairattribute</span> — C4D-only node: it has no Houdini counterpart and is skipped when pasting in Houdini.</li>
+    <li><span class="nm st">osl / rsosl</span> — aliased to Houdini&#x27;s `rsosl`; the OSL source travels best-effort, dynamically created ports may not</li>
+    <li><span class="nm st">reference</span> — C4D-only node: it has no Houdini counterpart and is skipped when pasting in Houdini.</li>
+    <li><span class="nm st">rsramp</span> — node travels, but ramp/curve knot values are not carried in v1 (reset to defaults on paste)</li>
+    <li><span class="nm st">rsscalarramp</span> — node travels, but ramp/curve knot values are not carried in v1 (reset to defaults on paste)</li>
+    <li><span class="nm st">shadermerge</span> — Houdini-only node: it has no C4D counterpart and is skipped when pasting in C4D.</li>
+    <li><span class="nm st">vopswitch</span> — Houdini-only node: it has no C4D counterpart and is skipped when pasting in C4D.</li>
+    <li><span class="nm">output</span> — the material Output node -- the bridge wires surface/displacement/volume outputs itself</li>
+  </ul>
+</section>
+<footer>Generated 2026-07-08 · regenerate with
+<code>python tools/build_node_guide.py</code> after Redshift updates —
+the inventories refresh automatically on every Copy.</footer>
+</div>
+<script>
+(function(){
+  var chips=[].slice.call(document.querySelectorAll('.chip'));
+  var secs=[].slice.call(document.querySelectorAll('main section'));
+  var btns=[].slice.call(document.querySelectorAll('.fbtn'));
+  var shown=document.getElementById('shown');
+  var st='all', q='';
+  function apply(){
+    var n=0;
+    chips.forEach(function(c){
+      var on=(st==='all'||c.dataset.st===st)&&c.dataset.name.indexOf(q)>-1;
+      c.classList.toggle('hidden',!on); if(on)n++;
+    });
+    secs.forEach(function(s){
+      s.classList.toggle('hidden',!s.querySelector('.chip:not(.hidden)'));
+    });
+    shown.textContent=n+' / '+chips.length+' nodes';
+  }
+  document.getElementById('q').addEventListener('input',function(e){
+    q=e.target.value.toLowerCase().trim(); apply();
+  });
+  btns.forEach(function(b){
+    b.addEventListener('click',function(){
+      st=b.dataset.f;
+      btns.forEach(function(x){x.setAttribute('aria-pressed',x===b);});
+      apply();
+    });
+  });
+  apply();
+})();
+</script>

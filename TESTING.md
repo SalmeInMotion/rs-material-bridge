@@ -26,10 +26,9 @@ proxies, fully editable result).
   Hermite have no Cinema 4D equivalent and arrive as a smooth curve;
   Cinema 4D's per-knot *bias* has no Houdini equivalent and is dropped.
   Both cases warn.
-- **Enum / dropdown values can land wrong.** Cinema 4D stores them as
-  numbers and Houdini as names, so settings like `diffuse_model` may end
-  up on the wrong entry. Every one of them warns ("set from ... via str
-  coercion -- verify the value"). Next on the list.
+- **Enums / dropdowns do travel correctly** (verified): both applications
+  identify the options by the same Redshift numbers, so `diffuse_model`,
+  `ms_mode` and friends land on the right entry.
 - **OSL**: the node travels with its source best-effort; dynamically
   created ports may not reconnect.
 - **Animated texture sequences**: static texture paths travel; C4D's

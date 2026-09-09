@@ -569,27 +569,34 @@ def _set_parm(pt, value, node_label, warnings):
         return True
     except (hou.Error, TypeError):
         pass
-    # Typed coercion fallbacks. String parms only accept str -- but feeding
-    # a menu parm the repr of a number would corrupt it silently, so menu
-    # tokens are validated and every coerced set is reported for review.
+    # Typed coercion fallbacks. Redshift dropdowns are String parms in
+    # Houdini whose menu tokens are the option numbers ("0", "1", "2") --
+    # the same integers Cinema 4D stores -- so converting a number to its
+    # string is exact whenever it names a real menu entry, and only the
+    # cases that are genuinely a guess are worth reporting.
     is_string = (pt.parmTemplate().type() == hou.parmTemplateType.String)
     for conv in ((str,) if is_string else (float, int)):
         try:
             coerced = tuple(conv(v) for v in vals)
         except (TypeError, ValueError):
             continue
+        exact = False
         if is_string:
             try:
                 menu = pt[0].menuItems()
             except hou.Error:
                 menu = ()
-            if menu and coerced[0] not in menu:
-                break  # not a valid menu token: warn below instead
+            if menu:
+                if coerced[0] not in menu:
+                    break  # not a valid option: report the failure below
+                exact = True
         try:
             pt.set(coerced)
-            warnings.append("%s: parm '%s' set from %r via %s coercion -- "
-                            "verify the value"
-                            % (node_label, pt.name(), value, conv.__name__))
+            if not exact:
+                warnings.append("%s: parm '%s' set from %r via %s "
+                                "coercion -- verify the value"
+                                % (node_label, pt.name(), value,
+                                   conv.__name__))
             return True
         except (hou.Error, TypeError, ValueError):
             continue

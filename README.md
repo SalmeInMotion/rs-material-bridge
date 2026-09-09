@@ -198,10 +198,11 @@ counterpart and is dropped. Both warn rather than pass silently.
 - **Ramps / curves** are skipped with a warning (different representation on
   each side — planned for v2).
 - OSL nodes, per-node C4D layouts, and Houdini spare parms are not carried.
-- Enum parameters travel as raw values; a few may need a mapping table if the
-  two plugins disagree (they mostly don't — same RS core). Watch the console
-  warnings after a paste: every parameter that could not be matched or set is
-  listed there.
+- Enum parameters need no mapping table: both plugins identify the options
+  by the same Redshift numbers (Houdini's dropdowns literally use "0", "1",
+  "2" as their menu tokens), so they are transferred exactly. Watch the
+  console warnings after a paste: every parameter that could not be matched
+  or set is listed there.
 - Texture paths are copied verbatim (no repathing). Broken paths show up in
   the destination app as-is.
 - C4D pastes are not auto-arranged — use the node editor's Arrange command.

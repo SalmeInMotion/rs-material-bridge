@@ -1,0 +1,119 @@
+"""RS Material Bridge -- Cinema 4D menu plugin.
+
+Registers Copy / Paste as real commands and adds an "RS Bridge" entry to
+the main menu bar, so the tool is one click away instead of buried in the
+Script Manager. Install with install.py, which copies this file (and the
+core module next to it) into the C4D user plugins folder.
+
+PLUGIN IDS: the ids below are Maxon's development range (1000001-1000010).
+They are fine for testing but MUST be replaced with ids registered at
+plugincafe.maxon.net before public distribution, or they will collide with
+other developers' test plugins.
+"""
+
+import os
+import sys
+
+import c4d
+from c4d import plugins, gui
+
+PLUGIN_ID_COPY = 1000001
+PLUGIN_ID_PASTE = 1000002
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+try:
+    import rs_bridge_c4d_core as bridge
+except ImportError:
+    bridge = None
+
+
+def _require_bridge():
+    if bridge is None:
+        gui.MessageDialog(
+            "RS Material Bridge: rs_bridge_c4d_core.py is missing from\n"
+            "%s\n\nRe-run the installer." % _HERE)
+        return False
+    return True
+
+
+class CopyMaterialCommand(plugins.CommandData):
+    def Execute(self, doc):
+        if not _require_bridge():
+            return True
+        bridge.run_copy()
+        return True
+
+    def GetState(self, doc):
+        return c4d.CMD_ENABLED
+
+
+class PasteMaterialCommand(plugins.CommandData):
+    def Execute(self, doc):
+        if not _require_bridge():
+            return True
+        bridge.run_paste()
+        return True
+
+    def GetState(self, doc):
+        return c4d.CMD_ENABLED
+
+
+def _build_menu():
+    """Insert an 'RS Bridge' menu into the main menu bar."""
+    main_menu = gui.GetMenuResource("M_EDITOR")
+    if main_menu is None:
+        return
+    # Don't add the menu twice when C4D rebuilds it (layout changes).
+    for _index, value in main_menu:
+        if isinstance(value, c4d.BaseContainer) and \
+                value.GetString(c4d.MENURESOURCE_SUBTITLE) == "RS Bridge":
+            return
+
+    menu = c4d.BaseContainer()
+    menu.InsData(c4d.MENURESOURCE_SUBTITLE, "RS Bridge")
+    menu.InsData(c4d.MENURESOURCE_COMMAND,
+                 "PLUGIN_CMD_%d" % PLUGIN_ID_COPY)
+    menu.InsData(c4d.MENURESOURCE_COMMAND,
+                 "PLUGIN_CMD_%d" % PLUGIN_ID_PASTE)
+
+    plugins_menu = gui.SearchPluginMenuResource()
+    if plugins_menu is not None:
+        main_menu.InsDataAfter(c4d.MENURESOURCE_STRING, menu, plugins_menu)
+    else:
+        main_menu.InsData(c4d.MENURESOURCE_STRING, menu)
+
+
+def PluginMessage(msg_id, data):
+    if msg_id == c4d.C4DPL_BUILDMENU:
+        _build_menu()
+    return True
+
+
+def _icon(name):
+    path = os.path.join(_HERE, "res", name)
+    if not os.path.isfile(path):
+        return None
+    bmp = c4d.bitmaps.BaseBitmap()
+    if bmp.InitWith(path)[0] != c4d.IMAGERESULT_OK:
+        return None
+    return bmp
+
+
+if __name__ == "__main__":
+    plugins.RegisterCommandPlugin(
+        id=PLUGIN_ID_COPY,
+        str="Copy RS Material",
+        info=0,
+        icon=_icon("copy.tif"),
+        help="Copy the active Redshift material to the bridge clipboard",
+        dat=CopyMaterialCommand())
+    plugins.RegisterCommandPlugin(
+        id=PLUGIN_ID_PASTE,
+        str="Paste RS Material",
+        info=0,
+        icon=_icon("paste.tif"),
+        help="Rebuild the material held in the bridge clipboard",
+        dat=PasteMaterialCommand())

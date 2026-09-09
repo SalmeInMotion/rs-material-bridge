@@ -17,40 +17,47 @@ output wiring) to a small JSON file and rebuilds it natively on the other side.
 
 ## Setup
 
-### Houdini
+Put this folder anywhere you like, then run the installer:
 
-Create two shelf tools with the contents of
-[houdini/shelf_copy_snippet.py](houdini/shelf_copy_snippet.py) and
-[houdini/shelf_paste_snippet.py](houdini/shelf_paste_snippet.py)
-(Right-click a shelf > New Tool > Script tab, language Python).
+- **Windows**: double-click **`install.bat`** (it borrows the Python inside
+  Houdini or Cinema 4D if you don't have one of your own).
+- **macOS / Linux, or manually**: `python install.py`.
 
-- **RS Mat Copy** — select a `redshift_vopnet` (or any node inside it) and run.
-- **RS Mat Paste** — rebuilds the clipboard material under `/mat`.
+It detects the Houdini and Cinema 4D versions installed, preselects the
+preference folder each one actually uses, and lets you browse for any it
+missed. Press **Install** and restart the applications: both get an
+**RS Bridge** menu in the main menu bar (Houdini also gets a shelf tab).
 
-### Cinema 4D
+Nothing is written outside your Houdini / C4D preference folders, no paths
+are baked into the scripts, and **Uninstall** removes exactly what was
+added. Concretely:
 
-The `c4d` folder is exposed inside C4D's user scripts folder through a
-directory junction (already set up on this machine):
+| | What the installer adds |
+|---|---|
+| Houdini | `<prefs>/packages/rs_material_bridge.json` — puts the module on `PYTHONPATH` and this repo's `houdini/package` on `HOUDINI_PATH` (menu + shelf) |
+| Cinema 4D | `<prefs>/library/scripts/rs-material-bridge/` (Script Manager) and `<prefs>/plugins/rs-material-bridge/` (the menu plugin) |
 
+> Houdini preference folders are easy to get wrong: OneDrive redirection can
+> leave an unused `Documents/houdiniXX.X` decoy next to the real one. The
+> installer scores each candidate by what it actually contains and only
+> preselects the plausible one, marking the rest "unused?".
+
+### Commands
+
+- **Copy RS Material** — Houdini: select a `redshift_vopnet` (or any node
+  inside it). C4D: select the material in the Material Manager.
+- **Paste RS Material** — rebuilds the clipboard material (Houdini: under
+  `/mat`; C4D: into the active document).
+- **Refresh Node Inventory** — rarely needed, every Copy already does it.
+
+### Developer setup
+
+To work on the code without reinstalling, link instead of copying — the
+installer detects links and leaves them alone:
+
+```powershell
+New-Item -ItemType Junction -Path "<c4d prefs>\library\scripts\rs-material-bridge" -Target "<repo>\c4d"
 ```
-%APPDATA%\Maxon\Maxon Cinema 4D 2024_A5DBFF93\library\scripts\rs-material-bridge
-    -> C:\IA\Tools\C4D\rs-material-bridge\c4d
-```
-
-so the scripts show up directly in the Script Manager / Extensions menu and
-always reflect the latest repo version (no copies to keep in sync). On
-another machine, either recreate the junction
-(`New-Item -ItemType Junction -Path <scripts>\rs-material-bridge -Target <repo>\c4d`)
-or just copy the whole `c4d` folder there.
-
-- **rs_mat_copy** — copies the *active* (selected) Redshift node material.
-- **rs_mat_paste** — inserts the clipboard material into the active document.
-- **rs_mat_dump_classes** — refreshes the node inventory only (see below);
-  rarely needed, every Copy already does it.
-
-All are thin wrappers around
-[c4d/rs_bridge_c4d_core.py](c4d/rs_bridge_c4d_core.py), which must stay next
-to them.
 
 ## Interchange format (v1)
 

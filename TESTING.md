@@ -44,24 +44,27 @@ proxies, fully editable result).
 
 Requirements: Houdini 19.5+ and/or Cinema 4D 2024+ with Redshift on both.
 
-**Houdini**: put the repo anywhere. Create two shelf tools (right-click a
-shelf > New Tool > Script tab) pasting the contents of
-`houdini/shelf_copy_snippet.py` and `houdini/shelf_paste_snippet.py`, and
-**edit the `_DIR` line** in each to your repo's `houdini` folder.
+1. Put this folder wherever you want to keep it.
+2. Double-click **`install.bat`** (Windows) or run `python install.py`.
+3. Confirm the detected Houdini / Cinema 4D versions, press **Install**.
+4. Restart the applications.
 
-**Cinema 4D**: copy the whole `c4d` folder into your user scripts
-directory, e.g.
-`%APPDATA%\Maxon\<your C4D version folder>\library\scripts\rs-material-bridge`
-(macOS: `~/Library/Preferences/Maxon/<version>/library/scripts/`).
-The scripts appear under Extensions > User Scripts after a restart (or
-run them from the Script Manager directly).
+Both apps get an **RS Bridge** menu in the top menu bar. The installer only
+writes inside your Houdini / C4D preference folders, and **Uninstall**
+removes exactly what it added.
+
+If the installer can't find your installation, use "Browse for another
+folder..." and point it at the preference folder (Houdini: the folder named
+`houdini20.5`, `houdini21.0`... in Documents or your home folder; C4D: the
+folder inside `AppData/Roaming/Maxon`). **If that happens, please tell me —
+detection failing is itself a bug worth reporting.**
 
 ## Workflow
 
 1. Select a Redshift material (C4D: in the Material Manager; Houdini: the
    `redshift_vopnet` or any node inside it).
-2. Run **Copy** in the source app.
-3. Run **Paste** in the target app.
+2. **RS Bridge > Copy RS Material** in the source app.
+3. **RS Bridge > Paste RS Material** in the target app.
 
 The transfer goes through `~/.rs_material_bridge/clipboard.json` — both
 apps on the same machine. Cross-machine: copy that file over (or point

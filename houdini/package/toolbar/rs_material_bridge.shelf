@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RS Material Bridge shelf. Installed alongside the menu; the module is
+  importable because the package puts it on PYTHONPATH.
+-->
+<shelfDocument>
+  <toolshelf name="rs_material_bridge" label="RS Bridge">
+    <memberTool name="rs_bridge_copy_material"/>
+    <memberTool name="rs_bridge_paste_material"/>
+  </toolshelf>
+
+  <tool name="rs_bridge_copy_material" label="RS Copy" icon="SHELF_copy">
+    <helpText><![CDATA[Copy the selected Redshift material to the bridge clipboard, so it can be pasted in Cinema 4D.]]></helpText>
+    <script scriptType="python"><![CDATA[
+import rs_bridge_hou
+rs_bridge_hou.copy_selected_material()
+]]></script>
+  </tool>
+
+  <tool name="rs_bridge_paste_material" label="RS Paste" icon="SHELF_paste">
+    <helpText><![CDATA[Rebuild the material held in the bridge clipboard into /mat.]]></helpText>
+    <script scriptType="python"><![CDATA[
+import rs_bridge_hou
+rs_bridge_hou.paste_material()
+]]></script>
+  </tool>
+</shelfDocument>

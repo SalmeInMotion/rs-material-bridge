@@ -10,15 +10,14 @@ import os
 import sys
 import importlib
 
-_FALLBACK_DIR = r"C:\IA\Tools\C4D\rs-material-bridge\c4d"
-
+# The core module lives next to this script -- no install path is
+# hardcoded, so the folder works wherever the user put it.
 try:
     _here = os.path.dirname(os.path.abspath(__file__))
-except NameError:
-    _here = _FALLBACK_DIR
-for p in (_here, _FALLBACK_DIR):
-    if os.path.isdir(p) and p not in sys.path:
-        sys.path.insert(0, p)
+except NameError:  # pasted into the Console instead of run as a file
+    _here = None
+if _here and _here not in sys.path:
+    sys.path.insert(0, _here)
 
 try:
     import rs_bridge_c4d_core

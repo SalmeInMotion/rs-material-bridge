@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RS Material Bridge - top level menu.
+
+  Loaded through the package written by install.py, which puts this
+  folder on HOUDINI_PATH and the module folder on PYTHONPATH. No paths
+  are hardcoded here: the entries just import the module.
+-->
+<mainMenu>
+    <menuBar>
+        <subMenu id="rs_material_bridge_menu">
+            <label>RS Bridge</label>
+            <insertBefore>help_menu</insertBefore>
+
+            <scriptItem id="rs_bridge_copy_material">
+                <label>Copy RS Material</label>
+                <scriptCode><![CDATA[
+import rs_bridge_hou
+rs_bridge_hou.copy_selected_material()
+                ]]></scriptCode>
+            </scriptItem>
+
+            <scriptItem id="rs_bridge_paste_material">
+                <label>Paste RS Material</label>
+                <scriptCode><![CDATA[
+import rs_bridge_hou
+rs_bridge_hou.paste_material()
+                ]]></scriptCode>
+            </scriptItem>
+
+            <separatorItem/>
+
+            <scriptItem id="rs_bridge_dump_classes">
+                <label>Refresh Node Inventory</label>
+                <scriptCode><![CDATA[
+import rs_bridge_hou
+classes = rs_bridge_hou.dump_node_classes()
+import hou
+if hou.isUIAvailable():
+    hou.ui.displayMessage(
+        "Wrote %d Redshift node classes to\n%s"
+        % (len(classes), rs_bridge_hou.CLASSES_SELF_FILE))
+                ]]></scriptCode>
+            </scriptItem>
+
+            <scriptItem id="rs_bridge_about">
+                <label>About / Clipboard Location</label>
+                <scriptCode><![CDATA[
+import rs_bridge_hou
+import hou
+msg = ("RS Material Bridge %s\n\n"
+       "Clipboard file:\n%s\n\n"
+       "Copy a Redshift material here, then run Paste in the other\n"
+       "application (Cinema 4D)."
+       % (rs_bridge_hou.TOOL_VERSION, rs_bridge_hou.CLIP_FILE))
+print(msg)
+if hou.isUIAvailable():
+    hou.ui.displayMessage(msg)
+                ]]></scriptCode>
+            </scriptItem>
+        </subMenu>
+    </menuBar>
+</mainMenu>

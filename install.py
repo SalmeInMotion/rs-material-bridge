@@ -17,6 +17,7 @@ Standard library only (tkinter ships with Python and with Houdini).
 
 import json
 import os
+import re
 import shutil
 import sys
 import traceback
@@ -60,35 +61,98 @@ def _home():
     return os.path.expanduser("~")
 
 
+def _registry_documents():
+    """The user's real Documents folder on Windows. Asking the registry is
+    the only reliable way: the folder is localized ('Documentos') and is
+    often redirected into OneDrive."""
+    if sys.platform != "win32":
+        return []
+    out = []
+    try:
+        import winreg
+        key_path = (r"Software\Microsoft\Windows\CurrentVersion\Explorer"
+                    r"\User Shell Folders")
+        for sub in ("User Shell Folders", "Shell Folders"):
+            path = key_path.replace("User Shell Folders", sub)
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as k:
+                    value, _t = winreg.QueryValueEx(k, "Personal")
+            except OSError:
+                continue
+            value = os.path.expandvars(value)
+            if value and os.path.isdir(value):
+                out.append(value)
+    except ImportError:
+        pass
+    return out
+
+
 def _candidate_doc_dirs():
-    """Places Houdini preference folders live. Documents may be redirected
-    by OneDrive, in which case Houdini falls back to the home folder --
-    both are checked, plus any OneDrive Documents folder present."""
+    """Places Houdini preference folders can live. Covers the home folder,
+    the real (possibly localized and OneDrive-redirected) Documents folder,
+    and any OneDrive root -- for those the immediate subfolders are scanned
+    too, so 'Documentos', 'Dokumente', 'Documenti'... all work without a
+    hardcoded list of names."""
     dirs = [_home(), os.path.join(_home(), "Documents")]
+    dirs.extend(_registry_documents())
+
+    onedrive_roots = []
     for key in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
         base = os.environ.get(key)
-        if base:
-            dirs.append(os.path.join(base, "Documents"))
+        if base and os.path.isdir(base):
+            onedrive_roots.append(base)
+    default_od = os.path.join(_home(), "OneDrive")
+    if os.path.isdir(default_od):
+        onedrive_roots.append(default_od)
+    for base in onedrive_roots:
+        dirs.append(base)
+        try:
+            for name in os.listdir(base):
+                sub = os.path.join(base, name)
+                if os.path.isdir(sub) and not name.startswith("."):
+                    dirs.append(sub)
+        except OSError:
+            continue
+
     if sys.platform == "darwin":
         dirs.append(os.path.join(_home(), "Library", "Preferences",
                                  "houdini"))
-    return [d for d in dirs if os.path.isdir(d)]
+
+    seen, out = set(), []
+    for d in dirs:
+        key = os.path.normcase(os.path.abspath(d))
+        if key not in seen and os.path.isdir(d):
+            seen.add(key)
+            out.append(d)
+    return out
 
 
 def _houdini_pref_score(path):
-    """How much a folder looks like the preference folder Houdini really
-    uses. Several can exist at once (OneDrive redirects Documents, leaving
-    empty decoys behind), so the fullest and most recent one wins."""
+    """Sort key telling apart the preference folder Houdini really uses
+    from leftovers. Several can coexist: OneDrive redirection moves
+    Documents and leaves an empty decoy behind, and an older location may
+    still hold a stale copy. Ranked by (looks like prefs, has content,
+    most recently written)."""
     score = 0
     for marker, points in (("houdini.env", 3), ("packages", 3),
                            ("toolbar", 2), ("desktop", 1), ("config", 1)):
         if os.path.exists(os.path.join(path, marker)):
             score += points
+    # A live preference folder always holds loose files (houdini.env,
+    # *.pref, desktop files...). Abandoned ones keep only empty
+    # subdirectories -- sometimes including 'packages' or 'toolbar', which
+    # is why the markers above cannot be trusted on their own.
     try:
-        score += min(int(os.path.getmtime(path) / 86400 / 365), 0) + 0
+        has_content = 1 if any(
+            os.path.isfile(os.path.join(path, n))
+            for n in os.listdir(path)) else 0
     except OSError:
-        pass
-    return score
+        has_content = 0
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        mtime = 0.0
+    return (has_content, score, mtime)
 
 
 def find_houdini_prefs():
@@ -106,7 +170,9 @@ def find_houdini_prefs():
             if not low.startswith("houdini"):
                 continue
             ver = name[len("houdini"):]
-            if not ver or not ver[0].isdigit():
+            # Strictly "20.5" / "21.0.440" -- skips houdini22.0_backup and
+            # other lookalike folders users leave around.
+            if not re.match(r"^\d+(\.\d+)*$", ver):
                 continue
             path = os.path.join(parent, name)
             if os.path.isdir(path):
@@ -127,7 +193,10 @@ def find_houdini_prefs():
         paths = sorted(by_version[ver], key=_houdini_pref_score,
                        reverse=True)
         for i, path in enumerate(paths):
-            out.append(("Houdini %s" % ver, path, i == 0))
+            # Only the best candidate of each version is preselected, and
+            # never an empty folder (a leftover, not a live install).
+            preselect = (i == 0 and _houdini_pref_score(path)[0] == 1)
+            out.append(("Houdini %s" % ver, path, preselect))
     return out
 
 

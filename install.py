@@ -1,8 +1,10 @@
 """RS Material Bridge -- installer.
 
-Double-click install.bat (Windows) or run `python install.py`. Detects the
-Houdini and Cinema 4D installations on this machine, lets you confirm or
-browse for them, and wires the tool in:
+Double-click install.bat (Windows) or run `python install.py`. It lists the
+Houdini and Cinema 4D versions installed on this machine and asks only
+which of them to set up -- working out where each one keeps its
+preferences is the installer's job, not the user's. It then wires the tool
+in:
 
   Houdini  -> a package in <prefs>/packages that puts the module on
               PYTHONPATH and adds an "RS Bridge" main menu + shelf.
@@ -246,6 +248,162 @@ def find_houdini_prefs():
     return out
 
 
+def _program_dirs():
+    out = []
+    for key in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+        value = os.environ.get(key)
+        if value and os.path.isdir(value):
+            out.append(value)
+    if sys.platform == "darwin":
+        out.append("/Applications")
+    out.append("/opt")
+    seen, dirs = set(), []
+    for d in out:
+        k = os.path.normcase(d)
+        if k not in seen and os.path.isdir(d):
+            seen.add(k)
+            dirs.append(d)
+    return dirs
+
+
+def find_houdini_installs():
+    """{series: install path} for every Houdini installed, e.g.
+    {'21.0': 'C:/Program Files/Side Effects Software/Houdini 21.0.440'}."""
+    installs = {}
+
+    def add(series, path):
+        # Keep the highest build of each series.
+        if series not in installs or path > installs[series]:
+            installs[series] = path
+
+    parents = []
+    for base in _program_dirs():
+        parents.append(os.path.join(base, "Side Effects Software"))
+        parents.append(os.path.join(base, "Houdini"))
+        parents.append(base)
+    for parent in parents:
+        if not os.path.isdir(parent):
+            continue
+        try:
+            names = os.listdir(parent)
+        except OSError:
+            continue
+        for name in names:
+            m = re.match(r"^(?:Houdini|hfs)[ _-]?(\d+)\.(\d+)(?:\.\d+)?$",
+                         name, re.IGNORECASE)
+            if not m:
+                continue
+            path = os.path.join(parent, name)
+            if os.path.isdir(path):
+                add("%s.%s" % (m.group(1), m.group(2)), path)
+
+    hfs = os.environ.get("HFS")
+    if hfs and os.path.isdir(hfs):
+        m = re.search(r"(\d+)\.(\d+)", os.path.basename(hfs))
+        if m:
+            add("%s.%s" % (m.group(1), m.group(2)), hfs)
+    return installs
+
+
+def find_c4d_installs():
+    """{token: install path}, token being the version as Maxon names it
+    ('2026', 'R25'), which is also what the preference folder is named."""
+    installs = {}
+    for base in _program_dirs():
+        try:
+            names = os.listdir(base)
+        except OSError:
+            continue
+        for name in names:
+            m = re.match(r"^Maxon Cinema 4D (\S+)$", name, re.IGNORECASE)
+            if not m:
+                continue
+            token = m.group(1)
+            path = os.path.join(base, name)
+            if os.path.isdir(path) and "backup" not in name.lower():
+                installs.setdefault(token, path)
+    return installs
+
+
+def houdini_targets():
+    """[(label, prefs path, preselect)] driven by what is *installed*.
+
+    The user picks a version; finding its preference folder is done here:
+    the best existing candidate, or -- for a Houdini that has never been
+    launched -- the folder it will create on first run."""
+    prefs = find_houdini_prefs()
+    installs = find_houdini_installs()
+    by_series = {}
+    for label, path, preselect in prefs:
+        series = label.split()[-1]
+        by_series.setdefault(series, []).append((path, preselect))
+
+    def ver_key(s):
+        try:
+            return [int(p) for p in s.split(".")]
+        except ValueError:
+            return [0]
+
+    out = []
+    for series in sorted(set(installs) | set(by_series), key=ver_key,
+                         reverse=True):
+        candidates = by_series.get(series, [])
+        chosen = None
+        for path, preselect in candidates:
+            if preselect:
+                chosen = path
+                break
+        if chosen is None and candidates:
+            chosen = candidates[0][0]
+        if chosen is None:
+            # Installed but never launched: use the folder Houdini will
+            # create on first run.
+            docs = _registry_documents() or [os.path.join(_home(),
+                                                          "Documents")]
+            chosen = os.path.join(docs[0], "houdini%s" % series)
+        installed = series in installs
+        label = "Houdini %s" % series
+        if not installed:
+            label += "  (not installed)"
+        out.append((label, chosen, installed))
+    return out
+
+
+def c4d_targets():
+    """[(label, prefs path, preselect)] for Cinema 4D, same idea. A C4D
+    that has never been launched has no preference folder yet (its name
+    carries a per-install hash), so it is listed as needing one run."""
+    prefs = {}
+    for label, path, _pre in find_c4d_prefs():
+        token = label.replace("Cinema 4D ", "").strip()
+        prefs.setdefault(token, path)
+    installs = find_c4d_installs()
+
+    def token_key(t):
+        # Year versions (2026) first and newest first, then R-numbered ones.
+        m = re.match(r"^(\d{4})$", t)
+        if m:
+            return (2, int(m.group(1)))
+        m = re.match(r"^R(\d+)$", t, re.IGNORECASE)
+        if m:
+            return (1, int(m.group(1)))
+        return (0, 0)
+
+    out = []
+    for token in sorted(set(installs) | set(prefs), key=token_key,
+                        reverse=True):
+        path = prefs.get(token)
+        installed = token in installs
+        label = "Cinema 4D %s" % token
+        if path is None:
+            out.append((label + "  (launch it once first)", "", False))
+        else:
+            if not installed:
+                label += "  (not installed)"
+            out.append((label, path, installed))
+    return out
+
+
 def find_c4d_prefs():
     """Return [(label, path)] of Cinema 4D preference folders."""
     roots = []
@@ -389,18 +547,17 @@ class InstallerUI(object):
         ttk.Label(frm, text=APP_NAME,
                   font=("Segoe UI", 15, "bold")).pack(anchor="w")
         ttk.Label(frm, text="Copy and paste Redshift materials between "
-                            "Houdini and Cinema 4D.\nPick the versions to "
-                            "set up, then press Install.",
+                            "Houdini and Cinema 4D.\nTick the versions you "
+                            "want it in and press Install -- the "
+                            "destination is worked out for you.",
                   justify="left").pack(anchor="w", pady=(2, 12))
 
         self.hou_rows = self._app_section(
-            frm, "Houdini", find_houdini_prefs(),
-            "No Houdini preference folder found -- browse for e.g. "
-            "Documents/houdini20.5")
+            frm, "Houdini", houdini_targets(),
+            "No Houdini installation found on this machine.")
         self.c4d_rows = self._app_section(
-            frm, "Cinema 4D", find_c4d_prefs(),
-            "No Cinema 4D preference folder found -- browse for the folder "
-            "inside AppData/Roaming/Maxon")
+            frm, "Cinema 4D", c4d_targets(),
+            "No Cinema 4D installation found on this machine.")
 
         btns = ttk.Frame(frm)
         btns.pack(fill="x", pady=(6, 8))
@@ -425,39 +582,42 @@ class InstallerUI(object):
             for label, path, preselect in found:
                 var = tk.BooleanVar(value=preselect)
                 row = ttk.Frame(box)
-                row.pack(fill="x", pady=1)
+                row.pack(fill="x", pady=(2, 0))
+                state = "normal" if path else "disabled"
                 ttk.Checkbutton(row, text=label, variable=var,
-                                width=18).pack(side="left")
+                                state=state).pack(side="left")
                 pvar = tk.StringVar(value=path)
-                ttk.Entry(row, textvariable=pvar).pack(
-                    side="left", fill="x", expand=True, padx=(0, 6))
-                if not preselect:
-                    ttk.Label(row, text="unused?",
-                              foreground="#888").pack(side="left")
-                rows.append((var, pvar))
+                # The destination is shown for transparency, not as a
+                # question: picking the version is the user's job, finding
+                # its preference folder is ours.
+                lbl = ttk.Label(box, textvariable=pvar, foreground="#777")
+                lbl.pack(anchor="w", padx=(24, 0))
+                rows.append((var, pvar, lbl))
         else:
             ttk.Label(box, text=empty_hint, foreground="#a33").pack(
                 anchor="w", pady=(0, 6))
 
         add = ttk.Frame(box)
-        add.pack(fill="x", pady=(6, 0))
-        ttk.Button(add, text="Browse for another folder...",
-                   command=lambda: self._browse(box, rows)).pack(side="left")
+        add.pack(fill="x", pady=(8, 0))
+        ttk.Button(add, text="Other location...",
+                   command=lambda: self._browse(box, rows, add)).pack(
+                       side="left")
         return rows
 
-    def _browse(self, box, rows):
-        path = filedialog.askdirectory(title="Select the preference folder")
+    def _browse(self, box, rows, before_widget):
+        path = filedialog.askdirectory(
+            title="Select the preference folder to install into")
         if not path:
             return
         var = tk.BooleanVar(value=True)
         row = ttk.Frame(box)
-        row.pack(fill="x", pady=1, before=box.winfo_children()[-1])
-        ttk.Checkbutton(row, text="custom", variable=var,
-                        width=18).pack(side="left")
+        row.pack(fill="x", pady=(2, 0), before=before_widget)
+        ttk.Checkbutton(row, text="Custom location",
+                        variable=var).pack(side="left")
         pvar = tk.StringVar(value=path)
-        ttk.Entry(row, textvariable=pvar).pack(
-            side="left", fill="x", expand=True, padx=(0, 6))
-        rows.append((var, pvar))
+        lbl = ttk.Label(box, textvariable=pvar, foreground="#777")
+        lbl.pack(anchor="w", padx=(24, 0), before=before_widget)
+        rows.append((var, pvar, lbl))
 
     def log(self, msg):
         self.log_box.insert("end", msg + "\n")
@@ -465,7 +625,7 @@ class InstallerUI(object):
         self.root.update_idletasks()
 
     def _selected(self, rows):
-        return [p.get().strip() for on, p in rows
+        return [p.get().strip() for on, p, _lbl in rows
                 if on.get() and p.get().strip()]
 
     def _run(self, hou_fn, c4d_fn, verb):
@@ -510,11 +670,12 @@ def main_cli():
           % (APP_NAME, _tool_version()))
     def log(m):
         print("  " + m)
-    for _label, path, preselect in find_houdini_prefs():
-        if preselect:
+    for _label, path, preselect in houdini_targets():
+        if preselect and path:
             install_houdini(path, log)
-    for _label, path, _pre in find_c4d_prefs():
-        install_c4d(path, log)
+    for _label, path, preselect in c4d_targets():
+        if preselect and path:
+            install_c4d(path, log)
     print("Done. Restart the applications.")
 
 

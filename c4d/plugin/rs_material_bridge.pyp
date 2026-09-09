@@ -11,6 +11,7 @@ plugincafe.maxon.net before public distribution, or they will collide with
 other developers' test plugins.
 """
 
+import importlib
 import os
 import sys
 
@@ -21,8 +22,15 @@ PLUGIN_ID_COPY = 1000001
 PLUGIN_ID_PASTE = 1000002
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
+
+# Installed, the core module sits next to this file; running straight from
+# the repository it is one level up. Both are relative to this file, so no
+# install path is hardcoded either way.
+for _cand in (_HERE, os.path.dirname(_HERE)):
+    if os.path.isfile(os.path.join(_cand, "rs_bridge_c4d_core.py")):
+        if _cand not in sys.path:
+            sys.path.insert(0, _cand)
+        break
 
 try:
     import rs_bridge_c4d_core as bridge
@@ -31,11 +39,19 @@ except ImportError:
 
 
 def _require_bridge():
+    """Reload before every command so an updated core module takes effect
+    without restarting Cinema 4D -- and, more importantly, so the plugin
+    can never run a stale copy of it."""
+    global bridge
     if bridge is None:
         gui.MessageDialog(
-            "RS Material Bridge: rs_bridge_c4d_core.py is missing from\n"
+            "RS Material Bridge: rs_bridge_c4d_core.py was not found near\n"
             "%s\n\nRe-run the installer." % _HERE)
         return False
+    try:
+        importlib.reload(bridge)
+    except Exception as e:
+        print("[RS Bridge] could not reload the core module: %s" % e)
     return True
 
 

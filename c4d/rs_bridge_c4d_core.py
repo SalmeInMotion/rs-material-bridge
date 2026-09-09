@@ -454,6 +454,23 @@ def _url_from_path(path):
     return maxon.Url("file:///" + p.lstrip("/"))
 
 
+def _wrapped_bool(v):
+    """Real value of a non-Python boolean wrapper, or None if it cannot be
+    read -- None is reported as an unserializable value, which is far
+    better than guessing and silently changing how a material renders."""
+    for conv in (int, float):
+        try:
+            return bool(conv(v))
+        except (TypeError, ValueError):
+            continue
+    s = str(v).strip().lower()
+    if s in ("true", "1", "yes", "on"):
+        return True
+    if s in ("false", "0", "no", "off"):
+        return False
+    return None
+
+
 def to_jsonable(v):
     """maxon/c4d value -> plain JSON value, or None if not serializable."""
     if isinstance(v, bool) or isinstance(v, int) or isinstance(v, float):
@@ -474,7 +491,10 @@ def to_jsonable(v):
     if tn == "string":
         return str(v)
     if tn == "bool":
-        return bool(v)
+        # NEVER bool(v) here: on a wrapper object that asks "does this
+        # object exist", which is always True, so every checkbox came
+        # across ticked. int()/str() consult the actual value instead.
+        return _wrapped_bool(v)
     if tn in ("int", "int32", "int64", "uint", "uint32", "uint64"):
         return int(v)
     if tn in ("float", "float32", "float64"):

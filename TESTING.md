@@ -42,7 +42,12 @@ proxies, fully editable result).
 
 ## Install
 
-Requirements: Houdini 19.5+ and/or Cinema 4D 2024+ with Redshift on both.
+Requirements: **Houdini 20.5 or 21.0**, and/or **Cinema 4D 2024, 2025 or
+2026**, with Redshift installed in each.
+
+Deliberately out of scope: Houdini 22 (Redshift has no plugin for it yet)
+and Cinema 4D R25 / S26 (Redshift dropped them in 2026.0.0). The installer
+lists those with the reason rather than hiding them.
 
 1. Put this folder wherever you want to keep it.
 2. Double-click **`install.bat`** (Windows) or run `python install.py`.

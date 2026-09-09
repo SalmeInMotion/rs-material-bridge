@@ -42,6 +42,56 @@ C4D_PLUGIN_SRC = os.path.join(C4D_SRC_DIR, "plugin")
 C4D_SCRIPT_FILES = ("rs_bridge_c4d_core.py", "rs_mat_copy.py",
                     "rs_mat_paste.py", "rs_mat_dump_classes.py")
 
+# ---------------------------------------------------------------------------
+# Supported versions
+#
+# The bridge is only useful where Redshift itself runs, so the ceiling and
+# floor are Redshift's, not ours -- checked against Maxon's own docs
+# (2026-09):
+#   * Redshift 2026.0.0 "Dropped support for Cinema 4D R25 and S26".
+#   * Redshift for Houdini supports 19.0 / 19.5 / 20.0 / 20.5 / 21.0 only;
+#     Houdini 22 has no Redshift plugin yet.
+# Below that ceiling we only claim what this tool's own API use is known
+# to hold for: the C4D node-graph calls it relies on are the 2024+ ones.
+# ---------------------------------------------------------------------------
+
+HOUDINI_MIN_SERIES = (20, 5)
+HOUDINI_MAX_SERIES = (21, 0)
+C4D_MIN_YEAR = 2024
+
+
+def _series_tuple(series):
+    try:
+        parts = [int(p) for p in series.split(".")]
+    except ValueError:
+        return None
+    while len(parts) < 2:
+        parts.append(0)
+    return tuple(parts[:2])
+
+
+def houdini_support(series):
+    """(supported, reason) for a Houdini version series like '21.0'."""
+    st = _series_tuple(series)
+    if st is None:
+        return False, "unrecognised version"
+    if st > HOUDINI_MAX_SERIES:
+        return False, "Redshift has no plugin for Houdini %d yet" % st[0]
+    if st < HOUDINI_MIN_SERIES:
+        return False, "needs Houdini %d.%d or newer" % HOUDINI_MIN_SERIES
+    return True, ""
+
+
+def c4d_support(token):
+    """(supported, reason) for a C4D version token like '2026' or 'R25'."""
+    if re.match(r"^\d{4}$", token):
+        if int(token) < C4D_MIN_YEAR:
+            return False, "needs Cinema 4D %d or newer" % C4D_MIN_YEAR
+        return True, ""
+    if re.match(r"^[RS]\d+$", token, re.IGNORECASE):
+        return False, "Redshift dropped support for %s" % token
+    return False, "unrecognised version"
+
 
 def _tool_version():
     path = os.path.join(HOU_MODULE_DIR, "rs_bridge_hou.py")
@@ -363,7 +413,13 @@ def houdini_targets():
             chosen = os.path.join(docs[0], "houdini%s" % series)
         if series not in installs:
             continue  # leftover preferences of an uninstalled version
-        out.append(("Houdini %s" % series, chosen, True))
+        supported, reason = houdini_support(series)
+        if supported:
+            out.append(("Houdini %s" % series, chosen, True))
+        else:
+            # Installed but out of scope: say why rather than stay silent,
+            # or it looks like the installer failed to see it.
+            out.append(("Houdini %s  -- %s" % (series, reason), "", False))
     return out
 
 
@@ -391,7 +447,10 @@ def c4d_targets():
     for token in sorted(installs, key=token_key, reverse=True):
         path = prefs.get(token)
         label = "Cinema 4D %s" % token
-        if path is None:
+        supported, reason = c4d_support(token)
+        if not supported:
+            out.append((label + "  -- " + reason, "", False))
+        elif path is None:
             # Installed but never launched: only C4D itself can create the
             # preference folder, whose name carries a per-install hash.
             out.append((label + "  (launch it once first)", "", False))

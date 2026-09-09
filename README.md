@@ -15,6 +15,20 @@ output wiring) to a small JSON file and rebuilds it natively on the other side.
 `%USERPROFILE%\.rs_material_bridge\clipboard.json`
 (override with the `RS_MATERIAL_BRIDGE_DIR` environment variable).
 
+## Supported versions
+
+| | Supported | Why not the rest |
+|---|---|---|
+| **Houdini** | 20.5, 21.0 | **Houdini 22 has no Redshift plugin yet** — Redshift's Houdini builds stop at 21.0. Redshift still ships a final build for 19.0/19.5/20.0, but this tool is not verified there. |
+| **Cinema 4D** | 2024, 2025, 2026 | Redshift 2026.0.0 **dropped support for R25 and S26**. Cinema 4D 2023 runs Redshift, but the node-graph API this tool uses is only known-good from 2024 on. |
+
+Verified in production by the author: **Houdini 21.0.700** and **Cinema 4D
+2024.4 / 2026**. The other versions in the supported column share the same
+APIs but have not been exercised — please report anything odd.
+
+The installer lists any unsupported version it finds with the reason, so a
+missing entry always means "not installed", never "not detected".
+
 ## Setup
 
 Put this folder anywhere you like, then run the installer:

@@ -1,9 +1,40 @@
 # RS Material Bridge — beta testing guide
 
-**Version: 0.9.0-beta.1** — thanks for testing! This tool copy/pastes
+**Version: 0.9.0-beta.2** — thanks for testing! This tool copy/pastes
 Redshift node materials between **Houdini** and **Cinema 4D**, in both
 directions, rebuilding the material natively on the other side (no USD, no
 proxies, fully editable result).
+
+## Coming from the first beta? Remove it first
+
+The first beta was installed by hand, so nothing knows how to clean it up
+— and two copies fighting over the same clipboard would waste your time
+chasing bugs that are not there. Before installing this one:
+
+1. **Houdini**: delete the two shelf tools you created (right-click the
+   tool > Delete Tool).
+2. **Cinema 4D**: delete the folder you copied into
+   `.../library/scripts/rs-material-bridge`.
+3. Delete the old repository folder itself.
+4. Optional but tidy: delete `%USERPROFILE%\.rs_material_bridge` — the old
+   clipboard is in the previous format and would be refused anyway.
+
+Then run the installer below. From this version on, updating is just
+"run the installer again", and **Uninstall** removes everything it added.
+
+## What changed since your report
+
+Everything you found or asked for — see [CHANGELOG.md](CHANGELOG.md) for
+the full list. The short version: the checkbox bug is fixed (it was real
+and it affected every material), ramps now travel, several materials can
+be copied at once, there is a proper installer with menus in both
+applications, and pasted materials land where you are looking rather than
+on top of each other.
+
+Two things worth re-testing specifically: **the checkbox bug you found**
+(it is your report — please confirm the fix in a real material), and
+**ramps**, which are new and where the interpolation is mapped rather
+than identical.
 
 ## What it CAN do today
 

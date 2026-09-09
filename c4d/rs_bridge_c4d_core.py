@@ -706,13 +706,13 @@ def convert_like(current, value):
 # Export (C4D -> JSON)
 # ---------------------------------------------------------------------------
 
-def export_material(mat):
+def build_material(mat, warnings):
+    """Serialize one Redshift node material into an interchange dict."""
     graph = get_rs_graph(mat)
     if graph is None:
         raise RuntimeError("'%s' has no Redshift node graph. Select a "
                            "Redshift node material." % mat.GetName())
 
-    warnings = []
     nodes_json = []
     connections = []
     outputs = {}
@@ -848,20 +848,53 @@ def export_material(mat):
                                 % (nd["name"], nd["class"]))
 
     return {
+        "name": mat.GetName(),
+        "nodes": nodes_json,
+        "connections": resolved,
+        "outputs": outputs,
+    }
+
+
+def export_materials(mats):
+    """Serialize one or more materials into a clipboard payload. A failing
+    material is reported and skipped rather than losing the whole copy."""
+    warnings = []
+    materials = []
+    for mat in mats:
+        try:
+            materials.append(build_material(mat, warnings))
+        except Exception as e:
+            warnings.append("'%s' was not copied: %s" % (mat.GetName(), e))
+    if not materials:
+        raise RuntimeError(
+            "Nothing could be copied.\n\n"
+            + ("\n".join(warnings) if warnings else
+               "Select a Redshift node material."))
+    return {
         "format": FORMAT_NAME,
         "version": FORMAT_VERSION,
         "tool_version": TOOL_VERSION,
         "source_app": "c4d",
         "source_version": str(c4d.GetC4DVersion()),
         "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "material": {
-            "name": mat.GetName(),
-            "nodes": nodes_json,
-            "connections": resolved,
-            "outputs": outputs,
-        },
+        "materials": materials,
         "warnings": warnings,
     }
+
+
+def export_material(mat):
+    """Single-material convenience wrapper."""
+    return export_materials([mat])
+
+
+def clipboard_materials(data):
+    """Materials held in a clipboard payload, tolerating the single
+    'material' key written by earlier versions."""
+    materials = data.get("materials")
+    if materials:
+        return materials
+    single = data.get("material")
+    return [single] if single else []
 
 
 # ---------------------------------------------------------------------------
@@ -875,10 +908,9 @@ def _class_to_asset_id(node_json):
     return RS_NODE_PREFIX + CLASS_ALIASES.get(cls, cls)
 
 
-def import_material(data, doc):
-    warnings = list(data.get("warnings", []))
-    mat_json = data["material"]
-
+def build_c4d_material(mat_json, warnings):
+    """Rebuild one material from its interchange dict (not inserted yet).
+    Returns (material, nodes_built, connections_wired)."""
     mat = c4d.BaseMaterial(c4d.Mmaterial)
     mat.SetName(mat_json.get("name") or "RS Bridge Material")
     nm = mat.GetNodeMaterialReference()
@@ -1024,15 +1056,53 @@ def import_material(data, doc):
 
         txn.Commit()
 
+    return mat, len(built), wired
+
+
+def import_materials(data, doc):
+    """Rebuild every material held in the clipboard into `doc`."""
+    warnings = list(data.get("warnings", []))
+    materials_json = clipboard_materials(data)
+    if not materials_json:
+        raise RuntimeError("The clipboard holds no material.")
+
+    built, stats = [], {"nodes": 0, "nodes_total": 0,
+                        "connections": 0, "connections_total": 0,
+                        "materials": 0,
+                        "materials_total": len(materials_json)}
     doc.StartUndo()
-    doc.InsertMaterial(mat)
-    doc.AddUndo(c4d.UNDOTYPE_NEWOBJ, mat)
-    doc.EndUndo()
-    c4d.EventAdd()
-    stats = {"nodes": len(built), "nodes_total": len(mat_json["nodes"]),
-             "connections": wired,
-             "connections_total": len(mat_json.get("connections", []))}
-    return mat, warnings, stats
+    try:
+        for mat_json in materials_json:
+            stats["nodes_total"] += len(mat_json.get("nodes", []))
+            stats["connections_total"] += len(mat_json.get("connections",
+                                                           []))
+            try:
+                mat, n_nodes, n_wires = build_c4d_material(mat_json,
+                                                           warnings)
+            except Exception as e:
+                warnings.append("'%s' could not be pasted: %s"
+                                % (mat_json.get("name"), e))
+                continue
+            doc.InsertMaterial(mat)
+            doc.AddUndo(c4d.UNDOTYPE_NEWOBJ, mat)
+            built.append(mat)
+            stats["nodes"] += n_nodes
+            stats["connections"] += n_wires
+            stats["materials"] += 1
+    finally:
+        doc.EndUndo()
+        c4d.EventAdd()
+
+    if not built:
+        raise RuntimeError("No material could be rebuilt.\n\n"
+                           + "\n".join(warnings[-5:]))
+    return built, warnings, stats
+
+
+def import_material(data, doc):
+    """Single-material convenience wrapper."""
+    mats, warnings, stats = import_materials(data, doc)
+    return mats[0], warnings, stats
 
 
 # ---------------------------------------------------------------------------
@@ -1046,30 +1116,35 @@ def run_copy():
         pass  # inventory is a nice-to-have; never block the copy
     doc = c4d.documents.GetActiveDocument()
     mats = _try_call(doc, "GetActiveMaterials") or []
-    mat = mats[0] if mats else doc.GetActiveMaterial()
-    if mat is None:
-        gui.MessageDialog("Select a Redshift node material first.")
+    if not mats:
+        single = doc.GetActiveMaterial()
+        mats = [single] if single is not None else []
+    if not mats:
+        gui.MessageDialog("Select one or more Redshift node materials "
+                          "first.")
         return
     try:
-        data = export_material(mat)
-        if len(mats) > 1:
-            data["warnings"].append("%d materials selected -- copied only "
-                                    "'%s'" % (len(mats), mat.GetName()))
+        data = export_materials(mats)
     except Exception as e:
         traceback.print_exc()
         gui.MessageDialog("Copy failed:\n%s\n\nDetails in the Console." % e)
         return
     write_clip(data)
-    m = data["material"]
-    _log("Copied '%s': %d nodes, %d connections -> %s"
-         % (m["name"], len(m["nodes"]), len(m["connections"]), CLIP_FILE))
+
+    copied = data["materials"]
+    nodes = sum(len(m["nodes"]) for m in copied)
+    wires = sum(len(m["connections"]) for m in copied)
+    names = ", ".join(m["name"] for m in copied[:4])
+    if len(copied) > 4:
+        names += ", ... (%d total)" % len(copied)
+    _log("Copied %d material(s) [%s]: %d nodes, %d connections -> %s"
+         % (len(copied), names, nodes, wires, CLIP_FILE))
     for w in data["warnings"]:
         _log("  warning: %s" % w)
     gui.MessageDialog(
-        "Copied '%s' to the bridge clipboard.\n\n"
-        "Nodes: %d\nConnections: %d\nWarnings: %d%s"
-        % (m["name"], len(m["nodes"]), len(m["connections"]),
-           len(data["warnings"]),
+        "Copied to the bridge clipboard.\n\n"
+        "Materials: %d (%s)\nNodes: %d\nConnections: %d\nWarnings: %d%s"
+        % (len(copied), names, nodes, wires, len(data["warnings"]),
            "\n\nSee the Console for warning details."
            if data["warnings"] else ""))
 
@@ -1078,20 +1153,25 @@ def run_paste():
     doc = c4d.documents.GetActiveDocument()
     try:
         data = read_clip()
-        mat, warnings, stats = import_material(data, doc)
+        mats, warnings, stats = import_materials(data, doc)
     except Exception as e:
         traceback.print_exc()
         gui.MessageDialog("Paste failed:\n%s\n\nDetails in the Console." % e)
         return
-    _log("Pasted '%s' (from %s, bridge %s)"
-         % (mat.GetName(), data.get("source_app"),
+    names = ", ".join(m.GetName() for m in mats[:4])
+    if len(mats) > 4:
+        names += ", ... (%d total)" % len(mats)
+    _log("Pasted %d material(s) [%s] (from %s, bridge %s)"
+         % (len(mats), names, data.get("source_app"),
             data.get("tool_version", "?")))
     for w in warnings:
         _log("  warning: %s" % w)
     gui.MessageDialog(
-        "Pasted material '%s' (exported from %s).\n\n"
-        "Nodes: %d of %d\nConnections: %d of %d\nWarnings: %d%s"
-        % (mat.GetName(), data.get("source_app", "?"),
+        "Pasted from %s.\n\n"
+        "Materials: %d of %d (%s)\nNodes: %d of %d\nConnections: %d of %d\n"
+        "Warnings: %d%s"
+        % (data.get("source_app", "?"),
+           stats["materials"], stats["materials_total"], names,
            stats["nodes"], stats["nodes_total"],
            stats["connections"], stats["connections_total"], len(warnings),
            "\n\nSee the Console for warning details." if warnings else ""))

@@ -85,10 +85,13 @@ of each version is preselected; the rest stay listed and selectable.
 
 ### Commands
 
-- **Copy RS Material** — Houdini: select a `redshift_vopnet` (or any node
-  inside it). C4D: select the material in the Material Manager.
-- **Paste RS Material** — rebuilds the clipboard material (Houdini: under
-  `/mat`; C4D: into the active document).
+- **Copy RS Material** — Houdini: select one or more `redshift_vopnet`
+  nodes (or any node inside one). C4D: select the materials in the
+  Material Manager. Everything selected is copied in one go.
+- **Paste RS Material** — rebuilds them all (Houdini: under `/mat`, laid
+  out in a row from the network editor cursor; C4D: into the active
+  document). A material that fails to rebuild is reported and skipped
+  instead of aborting the rest.
 - **Refresh Node Inventory** — rarely needed, every Copy already does it.
 
 ### Developer setup
@@ -100,29 +103,38 @@ installer detects links and leaves them alone:
 New-Item -ItemType Junction -Path "<c4d prefs>\library\scripts\rs-material-bridge" -Target "<repo>\c4d"
 ```
 
-## Interchange format (v1)
+## Interchange format (v2)
 
 ```json
 {
   "format": "rs-material-bridge",
-  "version": 1,
+  "version": 2,
   "source_app": "houdini",
-  "material": {
+  "materials": [{
     "name": "my_mat",
     "nodes": [
       {"key": "n0", "class": "openpbrmaterial", "name": "OpenPBR1",
        "params": {"base_color": [0.5, 0.1, 0.1], "specular_roughness": 0.4}},
       {"key": "n1", "class": "texturesampler", "name": "DiffTex",
-       "params": {"tex0.path": "C:/tex/diff.png", "tex0.colorspace": "sRGB"}}
+       "params": {"tex0.path": "C:/tex/diff.png", "tex0.colorspace": "sRGB"}},
+      {"key": "n2", "class": "rsramp", "name": "Ramp",
+       "params": {"ramp": {"_kind": "ramp", "color": true, "knots": [
+         {"pos": 0.0, "value": [0, 0, 0], "interp": "linear"},
+         {"pos": 1.0, "value": [1, 1, 1], "interp": "smooth"}]}}}
     ],
     "connections": [
       {"src": "n1", "src_port": "outcolor", "dst": "n0", "dst_port": "base_color"}
     ],
     "outputs": {"surface": "n0"}
-  },
+  }],
   "warnings": []
 }
 ```
+
+Version 2 replaced the single `material` key with the `materials` list
+(multi-copy) and added the ramp value type. Readers still accept the old
+single-material key; a clipboard written by a *newer* version is refused
+with a clear message rather than half-read.
 
 Conventions:
 

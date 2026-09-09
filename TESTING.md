@@ -74,10 +74,14 @@ detection failing is itself a bug worth reporting.**
 
 ## Workflow
 
-1. Select a Redshift material (C4D: in the Material Manager; Houdini: the
-   `redshift_vopnet` or any node inside it).
+1. Select **one or more** Redshift materials (C4D: in the Material
+   Manager; Houdini: the `redshift_vopnet` nodes, or any node inside one).
 2. **RS Bridge > Copy RS Material** in the source app.
 3. **RS Bridge > Paste RS Material** in the target app.
+
+Everything selected travels in one go. In Houdini the pasted materials
+are laid out in a row starting where you last had the network editor
+cursor, rather than piling up at the origin.
 
 The transfer goes through `~/.rs_material_bridge/clipboard.json` — both
 apps on the same machine. Cross-machine: copy that file over (or point

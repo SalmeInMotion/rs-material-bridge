@@ -369,8 +369,8 @@ def _connection_record(conn, dst, warnings=None):
     return (src, src_out, dst_in)
 
 
-def export_material(builder):
-    warnings = []
+def build_material(builder, warnings):
+    """Serialize one Redshift material builder into an interchange dict."""
     nodes = []
     connections = []
     outputs = {}
@@ -449,20 +449,50 @@ def export_material(builder):
                                 % (nd["name"], nd["class"]))
 
     return {
+        "name": builder.name(),
+        "nodes": nodes,
+        "connections": connections,
+        "outputs": outputs,
+    }
+
+
+def export_materials(builders):
+    """Serialize one or more material builders into a clipboard payload."""
+    warnings = []
+    materials = []
+    for b in builders:
+        try:
+            materials.append(build_material(b, warnings))
+        except Exception as e:
+            warnings.append("'%s' was not copied: %s" % (b.name(), e))
+    if not materials:
+        raise RuntimeError("Nothing could be copied.\n"
+                           + "\n".join(warnings))
+    return {
         "format": FORMAT_NAME,
         "version": FORMAT_VERSION,
         "tool_version": TOOL_VERSION,
         "source_app": "houdini",
         "source_version": hou.applicationVersionString(),
         "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "material": {
-            "name": builder.name(),
-            "nodes": nodes,
-            "connections": connections,
-            "outputs": outputs,
-        },
+        "materials": materials,
         "warnings": warnings,
     }
+
+
+def export_material(builder):
+    """Single-material convenience wrapper."""
+    return export_materials([builder])
+
+
+def clipboard_materials(data):
+    """Materials in a clipboard payload, tolerating the single 'material'
+    key written by earlier versions."""
+    materials = data.get("materials")
+    if materials:
+        return materials
+    single = data.get("material")
+    return [single] if single else []
 
 
 def copy_selected_material():
@@ -471,20 +501,30 @@ def copy_selected_material():
     except (hou.Error, OSError) as e:
         print("[RS Bridge] note: could not refresh the node inventory (%s)"
               % e)
-    sel = hou.selectedNodes()
-    builder = _find_builder(sel[0]) if sel else None
-    if builder is None:
-        _ui_error("[RS Bridge] Select a Redshift material "
+
+    builders, seen = [], set()
+    for node in hou.selectedNodes():
+        builder = _find_builder(node)
+        if builder is not None and builder.path() not in seen:
+            seen.add(builder.path())
+            builders.append(builder)
+    if not builders:
+        _ui_error("[RS Bridge] Select one or more Redshift materials "
                   "(redshift_vopnet) first.")
         return None
 
-    data = export_material(builder)
+    data = export_materials(builders)
     _write_clip(data)
 
-    mat = data["material"]
-    msg = ("[RS Bridge] Copied '%s': %d nodes, %d connections -> %s"
-           % (mat["name"], len(mat["nodes"]), len(mat["connections"]),
-              CLIP_FILE))
+    copied = data["materials"]
+    nodes = sum(len(m["nodes"]) for m in copied)
+    wires = sum(len(m["connections"]) for m in copied)
+    names = ", ".join(m["name"] for m in copied[:4])
+    if len(copied) > 4:
+        names += ", ... (%d total)" % len(copied)
+    msg = ("[RS Bridge] Copied %d material(s) [%s]: %d nodes, %d "
+           "connections -> %s" % (len(copied), names, nodes, wires,
+                                  CLIP_FILE))
     print(msg)
     for w in data["warnings"]:
         print("[RS Bridge]   warning: %s" % w)
@@ -577,18 +617,31 @@ def _named_output_index(node, name, warnings=None):
     return 0 if outs else None
 
 
-def import_material(data, dest="/mat"):
-    warnings = list(data.get("warnings", []))
-    mat = data["material"]
-    type_map = _rs_type_map()
-    if not type_map:
-        raise RuntimeError("No Redshift VOP node types found -- is "
-                           "Redshift for Houdini installed and licensed?")
+def _drop_position(matnet):
+    """Where to drop pasted materials: where the user last looked in the
+    network editor, so they land in view instead of always at the origin.
+    Falls back to clear space below whatever is already there."""
+    try:
+        if hou.isUIAvailable():
+            for pane in hou.ui.paneTabs():
+                if (pane.type() == hou.paneTabType.NetworkEditor
+                        and pane.pwd() == matnet):
+                    return hou.Vector2(pane.cursorPosition())
+    except (hou.Error, AttributeError, TypeError):
+        pass
+    lowest = None
+    for child in matnet.children():
+        pos = child.position()
+        if lowest is None or pos.y() < lowest.y():
+            lowest = pos
+    if lowest is None:
+        return hou.Vector2(0.0, 0.0)
+    return hou.Vector2(lowest.x(), lowest.y() - 2.0)
 
-    matnet = hou.node(dest)
-    if matnet is None:
-        raise RuntimeError("Destination network not found: %s" % dest)
 
+def build_hou_material(mat, matnet, type_map, warnings):
+    """Rebuild one material from its interchange dict. Returns
+    (builder, nodes_built, connections_wired)."""
     safe = re.sub(r"[^A-Za-z0-9_]", "_", mat.get("name") or "rs_bridge_mat")
     safe = re.sub(r"^(?=\d)", "_", safe)  # node names can't start with a digit
     builder = matnet.createNode("redshift_vopnet", safe)
@@ -667,19 +720,81 @@ def import_material(data, dest="/mat"):
     if not has_pos:
         builder.layoutChildren()
     builder.setMaterialFlag(True)
-    return builder, warnings
+    n_wires = sum(1 for c in mat.get("connections", [])
+                  if built.get(c["src"]) and built.get(c["dst"]))
+    return builder, len(built), n_wires
+
+
+def import_materials(data, dest="/mat"):
+    """Rebuild every material in the clipboard under `dest`."""
+    warnings = list(data.get("warnings", []))
+    materials = clipboard_materials(data)
+    if not materials:
+        raise RuntimeError("The clipboard holds no material.")
+
+    type_map = _rs_type_map()
+    if not type_map:
+        raise RuntimeError("No Redshift VOP node types found -- is "
+                           "Redshift for Houdini installed and licensed?")
+    matnet = hou.node(dest)
+    if matnet is None:
+        raise RuntimeError("Destination network not found: %s" % dest)
+
+    origin = _drop_position(matnet)
+    builders, stats = [], {"materials": 0, "materials_total": len(materials),
+                           "nodes": 0, "nodes_total": 0,
+                           "connections": 0, "connections_total": 0}
+    for i, mat in enumerate(materials):
+        stats["nodes_total"] += len(mat.get("nodes", []))
+        stats["connections_total"] += len(mat.get("connections", []))
+        try:
+            builder, n_nodes, n_wires = build_hou_material(
+                mat, matnet, type_map, warnings)
+        except Exception as e:
+            warnings.append("'%s' could not be pasted: %s"
+                            % (mat.get("name"), e))
+            continue
+        # Lay several pasted materials out in a row from the drop point.
+        builder.setPosition(hou.Vector2(origin.x() + i * 3.0, origin.y()))
+        builders.append(builder)
+        stats["materials"] += 1
+        stats["nodes"] += n_nodes
+        stats["connections"] += n_wires
+
+    if not builders:
+        raise RuntimeError("No material could be rebuilt.\n"
+                           + "\n".join(warnings[-5:]))
+    try:
+        builders[0].setCurrent(True, clear_all_selected=True)
+        for b in builders[1:]:
+            b.setCurrent(True, clear_all_selected=False)
+    except hou.Error:
+        pass
+    return builders, warnings, stats
+
+
+def import_material(data, dest="/mat"):
+    """Single-material convenience wrapper."""
+    builders, warnings, _stats = import_materials(data, dest)
+    return builders[0], warnings
 
 
 def paste_material(dest="/mat"):
     data = _read_clip()
-    builder, warnings = import_material(data, dest)
-    msg = ("[RS Bridge] Pasted '%s' (from %s) as %s"
-           % (data["material"].get("name"), data.get("source_app"),
-              builder.path()))
+    builders, warnings, stats = import_materials(data, dest)
+    names = ", ".join(b.name() for b in builders[:4])
+    if len(builders) > 4:
+        names += ", ... (%d total)" % len(builders)
+    msg = ("[RS Bridge] Pasted %d of %d material(s) from %s: %s  "
+           "(nodes %d/%d, connections %d/%d)"
+           % (stats["materials"], stats["materials_total"],
+              data.get("source_app"), names,
+              stats["nodes"], stats["nodes_total"],
+              stats["connections"], stats["connections_total"]))
     print(msg)
     for w in warnings:
         print("[RS Bridge]   warning: %s" % w)
     _ui_status(msg)
     if warnings:
         print("[RS Bridge] %d warning(s) -- see above." % len(warnings))
-    return builder
+    return builders

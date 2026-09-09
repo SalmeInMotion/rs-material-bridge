@@ -20,8 +20,16 @@ proxies, fully editable result).
 
 ## What it CANNOT do yet (known limitations — don't file these)
 
-- **Ramps / curves**: the ramp nodes travel, but knot/curve values do not
-  — they reset to defaults on paste. This is the top item on the roadmap.
+- **Ramp interpolation is mapped, not identical**: knot positions and
+  colours transfer exactly, and the four common modes map both ways
+  (step/none, linear, cubic, smooth). Houdini's Bezier, B-Spline and
+  Hermite have no Cinema 4D equivalent and arrive as a smooth curve;
+  Cinema 4D's per-knot *bias* has no Houdini equivalent and is dropped.
+  Both cases warn.
+- **Enum / dropdown values can land wrong.** Cinema 4D stores them as
+  numbers and Houdini as names, so settings like `diffuse_model` may end
+  up on the wrong entry. Every one of them warns ("set from ... via str
+  coercion -- verify the value"). Next on the list.
 - **OSL**: the node travels with its source best-effort; dynamically
   created ports may not reconnect.
 - **Animated texture sequences**: static texture paths travel; C4D's

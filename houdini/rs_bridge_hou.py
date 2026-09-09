@@ -34,8 +34,34 @@ import time
 import hou
 
 FORMAT_NAME = "rs-material-bridge"
-FORMAT_VERSION = 1
-TOOL_VERSION = "0.9.0-beta.1"
+FORMAT_VERSION = 2
+TOOL_VERSION = "0.9.0-beta.2"
+
+# Ramps travel with a neutral interpolation vocabulary; each application
+# maps it onto its own. Houdini's exotic bases (Bezier, B-Spline, Hermite)
+# have no Cinema 4D counterpart and are sent as the nearest smooth curve.
+RAMP_KIND = "ramp"
+
+
+def _hou_basis_maps():
+    b = hou.rampBasis
+    to_canon = {
+        b.Constant: "constant",
+        b.Linear: "linear",
+        b.CatmullRom: "cubic",
+        b.MonotoneCubic: "smooth",
+        b.Bezier: "cubic",
+        b.BSpline: "cubic",
+        b.Hermite: "cubic",
+    }
+    from_canon = {
+        "constant": b.Constant,
+        "linear": b.Linear,
+        "cubic": b.CatmullRom,
+        "smooth": b.MonotoneCubic,
+    }
+    lossy = {b.Bezier, b.BSpline, b.Hermite}
+    return to_canon, from_canon, lossy
 
 BRIDGE_DIR = os.environ.get(
     "RS_MATERIAL_BRIDGE_DIR",
@@ -163,9 +189,105 @@ def _find_builder(node):
 # Export
 # ---------------------------------------------------------------------------
 
+def _export_ramp(ramp, node_name, warnings):
+    """hou.Ramp -> interchange dict."""
+    to_canon, _from_canon, lossy = _hou_basis_maps()
+    knots = []
+    bases = list(ramp.basis())
+    keys = list(ramp.keys())
+    values = list(ramp.values())
+    reported = set()
+    for i, key in enumerate(keys):
+        basis = bases[i] if i < len(bases) else None
+        if basis in lossy and basis not in reported:
+            reported.add(basis)
+            warnings.append("%s: ramp uses %s interpolation, which Cinema "
+                            "4D has no equivalent for -- sent as a smooth "
+                            "curve" % (node_name, str(basis).split(".")[-1]))
+        value = values[i]
+        if isinstance(value, (tuple, list)):
+            value = [float(x) for x in value]
+        else:
+            value = float(value)
+        knots.append({"pos": float(key), "value": value,
+                      "interp": to_canon.get(basis, "linear")})
+    knots.sort(key=lambda k: k["pos"])
+    return {"_kind": RAMP_KIND, "color": bool(ramp.isColor()),
+            "knots": knots}
+
+
+def _import_ramp(pt, ramp_json, node_name, warnings):
+    """Interchange dict -> hou.Ramp on parm tuple `pt`."""
+    _to_canon, from_canon, _lossy = _hou_basis_maps()
+    knots = ramp_json.get("knots") or []
+    if not knots:
+        return False
+    try:
+        is_color = bool(pt.eval()[0].isColor())
+    except (hou.Error, AttributeError, IndexError):
+        is_color = bool(ramp_json.get("color"))
+
+    bases, keys, values = [], [], []
+    biased = False
+    for knot in knots:
+        canon = (knot.get("interp") or "linear").lower()
+        basis = from_canon.get(canon)
+        if basis is None:
+            basis = hou.rampBasis.Linear
+            warnings.append("%s: ramp interpolation '%s' is unknown, used "
+                            "linear" % (node_name, canon))
+        bases.append(basis)
+        keys.append(float(knot.get("pos", 0.0)))
+        value = knot.get("value")
+        if is_color:
+            if isinstance(value, (list, tuple)):
+                comps = [float(x) for x in value[:3]]
+                while len(comps) < 3:
+                    comps.append(comps[-1] if comps else 0.0)
+            else:
+                comps = [float(value or 0.0)] * 3
+            values.append(tuple(comps))
+        else:
+            if isinstance(value, (list, tuple)) and value:
+                value = sum(float(x) for x in value[:3]) / min(3, len(value))
+            values.append(float(value or 0.0))
+        if knot.get("bias") not in (None, 0.5):
+            biased = True
+
+    if biased:
+        warnings.append("%s: ramp knots carry a Cinema 4D bias, which "
+                        "Houdini has no equivalent for -- ignored"
+                        % node_name)
+    try:
+        pt.node().parm(pt.name()).set(
+            hou.Ramp(tuple(bases), tuple(keys), tuple(values)))
+        return True
+    except hou.Error as e:
+        warnings.append("%s: could not rebuild ramp '%s' (%s)"
+                        % (node_name, pt.name(), e))
+        return False
+
+
+def _ramp_instance_re(node):
+    """Matcher for the multiparm instances backing a ramp ('ramp1pos',
+    'ramp1c', 'ramp1interp'...). They repeat what the ramp itself already
+    carries and have no counterpart in other applications, so exporting
+    them is pure noise."""
+    names = [pt.name() for pt in node.parmTuples()
+             if pt.parmTemplate().type() == hou.parmTemplateType.Ramp]
+    if not names:
+        return None
+    alternatives = "|".join(re.escape(n) for n in names)
+    return re.compile(r"^(?:%s)\d+(?:pos|c|value|interp)$" % alternatives,
+                      re.IGNORECASE)
+
+
 def _export_parms(node, warnings):
     params = {}
+    ramp_instances = _ramp_instance_re(node)
     for pt in node.parmTuples():
+        if ramp_instances is not None and ramp_instances.match(pt.name()):
+            continue
         template = pt.parmTemplate()
         ttype = template.type()
         if ttype in (hou.parmTemplateType.Folder,
@@ -175,9 +297,12 @@ def _export_parms(node, warnings):
                      hou.parmTemplateType.Button):
             continue
         if ttype == hou.parmTemplateType.Ramp:
-            if not pt.isAtDefault():
-                warnings.append("%s: ramp parm '%s' not supported, skipped"
-                                % (node.name(), pt.name()))
+            try:
+                ramp = node.parm(pt.name()).eval()
+            except hou.Error:
+                continue
+            params[pt.name().lower()] = _export_ramp(ramp, node.name(),
+                                                     warnings)
             continue
         if pt.isAtDefault():
             continue
@@ -500,6 +625,9 @@ def import_material(data, dest="/mat"):
             if pt is None:
                 warnings.append("%s: no parm matches '%s'"
                                 % (node.name(), pname))
+                continue
+            if isinstance(pval, dict) and pval.get("_kind") == RAMP_KIND:
+                _import_ramp(pt, pval, node.name(), warnings)
                 continue
             _set_parm(pt, pval, node.name(), warnings)
 

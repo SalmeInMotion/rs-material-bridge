@@ -164,6 +164,23 @@ Classes that exist under different names in each app (e.g. `osl` in C4D is
 `rsosl` in Houdini) are bridged automatically via the alias table
 (`CLASS_ALIASES` in both bridge modules) and counted as portable.
 
+### Ramps
+
+Ramps travel with their knots (position, colour/value) intact. Because the
+two applications name their interpolation modes differently, the format
+carries a neutral vocabulary and each side maps onto its own:
+
+| Interchange | Cinema 4D | Houdini |
+|---|---|---|
+| `constant` | `none` | Constant |
+| `linear` | `linearknot` | Linear |
+| `cubic` | `cubicknot` (and `cubicbias`) | CatmullRom |
+| `smooth` | `smoothknot` (and `blend`) | MonotoneCubic |
+
+Houdini's Bezier / B-Spline / Hermite have no Cinema 4D counterpart and
+travel as `cubic`; Cinema 4D's per-knot **bias** has no Houdini
+counterpart and is dropped. Both warn rather than pass silently.
+
 ## Known limitations (v1)
 
 - **Ramps / curves** are skipped with a warning (different representation on

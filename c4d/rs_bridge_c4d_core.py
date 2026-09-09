@@ -25,8 +25,27 @@ import maxon
 from c4d import gui
 
 FORMAT_NAME = "rs-material-bridge"
-FORMAT_VERSION = 1
-TOOL_VERSION = "0.9.0-beta.1"
+FORMAT_VERSION = 2
+TOOL_VERSION = "0.9.0-beta.2"
+
+# Ramps. Each application names its interpolation modes differently, so the
+# interchange uses a neutral vocabulary and each side maps to its own.
+# The C4D names are the real enum, read from Redshift's node database.
+RAMP_KIND = "ramp"
+C4D_INTERP_TO_CANON = {
+    "none": "constant",
+    "linearknot": "linear",
+    "cubicknot": "cubic",
+    "smoothknot": "smooth",
+    "cubicbias": "cubic",     # bias travels alongside, unused elsewhere
+    "blend": "smooth",
+}
+CANON_TO_C4D_INTERP = {
+    "constant": "none",
+    "linear": "linearknot",
+    "cubic": "cubicknot",
+    "smooth": "smoothknot",
+}
 
 BRIDGE_DIR = os.environ.get(
     "RS_MATERIAL_BRIDGE_DIR",
@@ -454,6 +473,125 @@ def _url_from_path(path):
     return maxon.Url("file:///" + p.lstrip("/"))
 
 
+_KNOT_RE = re.compile(r"^_(\d+)$")
+
+
+def ramp_knot_ports(port):
+    """Knot ports of a ramp container, in index order, or None if `port`
+    is not a ramp. A ramp is an array port whose children are _0, _1..."""
+    kids = _children(port)
+    if not kids:
+        return None
+    indexed = []
+    for c in kids:
+        m = _KNOT_RE.match(_last_segment(c))
+        if m is None:
+            return None
+        indexed.append((int(m.group(1)), c))
+    return [c for _i, c in sorted(indexed)]
+
+
+def export_ramp(port, node_name, warnings):
+    """Ramp container port -> interchange dict, knots sorted by position."""
+    knots = []
+    is_color = False
+    for knot in ramp_knot_ports(port) or []:
+        fields = {}
+        for parts, p, leaf in walk_ports(knot):
+            if leaf:
+                fields[parts[-1].lower()] = _port_value(p)
+        pos = to_jsonable(fields.get("position"))
+        if pos is None:
+            continue
+        if "color" in fields:
+            is_color = True
+            value = to_jsonable(fields["color"])
+        else:
+            value = to_jsonable(fields.get("value"))
+        raw_interp = fields.get("interpolation")
+        interp_name = str(raw_interp).strip().lower() if raw_interp is not None else ""
+        canon = C4D_INTERP_TO_CANON.get(interp_name)
+        if canon is None and interp_name:
+            canon = "linear"
+            warnings.append("%s: ramp interpolation '%s' is unknown, sent "
+                            "as linear" % (node_name, interp_name))
+        knot = {"pos": float(pos), "value": value,
+                "interp": canon or "linear"}
+        bias = to_jsonable(fields.get("bias"))
+        if bias is not None:
+            knot["bias"] = float(bias)
+        knots.append(knot)
+    knots.sort(key=lambda k: k["pos"])
+    return {"_kind": RAMP_KIND, "color": is_color, "knots": knots}
+
+
+def import_ramp(port, ramp_json, node_name, warnings):
+    """Write an interchange ramp into a C4D ramp container port. Must be
+    called inside a graph transaction."""
+    knots = ramp_json.get("knots") or []
+    if not knots:
+        return
+    existing = ramp_knot_ports(port) or []
+    if len(existing) > len(knots):
+        warnings.append("%s: ramp has %d knots but only %d were sent; the "
+                        "extra ones keep their previous values"
+                        % (node_name, len(existing), len(knots)))
+    # Knot ports cannot be removed, only added -- indices must stay unique.
+    next_index = 0
+    for c in existing:
+        m = _KNOT_RE.match(_last_segment(c))
+        if m:
+            next_index = max(next_index, int(m.group(1)) + 1)
+    while len(existing) < len(knots):
+        try:
+            port.AddPort("_%d" % next_index)
+        except Exception as e:
+            warnings.append("%s: could not add ramp knot %d (%s)"
+                            % (node_name, next_index, e))
+            break
+        next_index += 1
+        existing = ramp_knot_ports(port) or []
+
+    for knot_port, knot in zip(existing, knots):
+        sub = {}
+        for parts, p, leaf in walk_ports(knot_port):
+            if leaf:
+                sub[parts[-1].lower()] = p
+
+        def _write(field, value):
+            p = sub.get(field)
+            if p is None or value is None:
+                return
+            _port_write(p, convert_like(_port_value(p), value))
+
+        _write("position", knot.get("pos"))
+        value = knot.get("value")
+        if "color" in sub:
+            if isinstance(value, (int, float)):
+                value = [float(value)] * 3   # scalar ramp -> colour ramp
+            _write("color", value)
+        elif "value" in sub:
+            if isinstance(value, (list, tuple)) and value:
+                value = sum(float(x) for x in value[:3]) / min(3, len(value))
+            _write("value", value)
+        _write("bias", knot.get("bias"))
+
+        interp_port = sub.get("interpolation")
+        if interp_port is not None:
+            canon = (knot.get("interp") or "linear").lower()
+            name = CANON_TO_C4D_INTERP.get(canon)
+            if name is None:
+                name = "linearknot"
+                warnings.append("%s: ramp interpolation '%s' has no Cinema "
+                                "4D equivalent, used linear"
+                                % (node_name, canon))
+            try:
+                _port_write(interp_port, maxon.InternedId(name))
+            except Exception as e:
+                warnings.append("%s: could not set ramp interpolation (%s)"
+                                % (node_name, e))
+
+
 def _wrapped_bool(v):
     """Real value of a non-Python boolean wrapper, or None if it cannot be
     read -- None is reported as an unserializable value, which is far
@@ -499,6 +637,10 @@ def to_jsonable(v):
         return int(v)
     if tn in ("float", "float32", "float64"):
         return float(v)
+    if tn == "internedid":
+        # Enum values ("smoothknot", "sRGB"...) are plain ids with no dot,
+        # so they must be taken by type rather than by the pattern below.
+        return str(v)
     for fields in (("r", "g", "b", "a"), ("r", "g", "b"),
                    ("x", "y", "z", "w"), ("x", "y", "z"), ("x", "y")):
         if all(hasattr(v, f) for f in fields):
@@ -610,7 +752,15 @@ def export_material(mat):
         unserializable = []
         inputs = _try_call(node, "GetInputs")
         if inputs is not None and not _is_null(inputs):
+            ramp_roots = set()
             for parts, port, is_leaf in walk_ports(inputs):
+                if parts[0] in ramp_roots:
+                    continue  # already carried inside its ramp
+                if not is_leaf and ramp_knot_ports(port) is not None:
+                    ramp_roots.add(parts[0])
+                    params[".".join(parts).lower()] = export_ramp(
+                        port, node_display_name(node), warnings)
+                    continue
                 if (len(parts) > 1 and _TEX_GROUP_RE.match(parts[0])
                         and parts[-1].lower() not in _TEX_CHILDREN_KEEP):
                     continue
@@ -788,6 +938,9 @@ def import_material(data, doc):
                 if port is None:
                     warnings.append("%s: no port matches '%s'"
                                     % (nd.get("name"), pname))
+                    continue
+                if isinstance(pval, dict) and pval.get("_kind") == RAMP_KIND:
+                    import_ramp(port, pval, nd.get("name") or "", warnings)
                     continue
                 current = _port_value(port)
                 converted = convert_like(current, pval)

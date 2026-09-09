@@ -37,10 +37,28 @@ added. Concretely:
 | Houdini | `<prefs>/packages/rs_material_bridge.json` — puts the module on `PYTHONPATH` and this repo's `houdini/package` on `HOUDINI_PATH` (menu + shelf) |
 | Cinema 4D | `<prefs>/library/scripts/rs-material-bridge/` (Script Manager) and `<prefs>/plugins/rs-material-bridge/` (the menu plugin) |
 
-> Houdini preference folders are easy to get wrong: OneDrive redirection can
-> leave an unused `Documents/houdiniXX.X` decoy next to the real one. The
-> installer scores each candidate by what it actually contains and only
-> preselects the plausible one, marking the rest "unused?".
+### How the Houdini preference folder is found
+
+No path is assumed: the installer asks the system, in this order.
+
+1. **`HOUDINI_USER_PREF_DIR`** if set (studios usually do) — it overrides
+   everything else, so those folders are the only ones preselected. The
+   `__HVER__` token is expanded.
+2. **The real Documents folder, read from the Windows registry.** This is
+   already localized (`Documentos`, `Dokumente`, ...) and already has any
+   OneDrive redirection resolved, so no folder name is ever guessed.
+3. The home folder and `~/Documents`, for setups using `$HOME`.
+4. Every OneDrive root (`OneDrive`, `OneDriveConsumer`,
+   `OneDriveCommercial`, `~/OneDrive`) **and each of its immediate
+   subfolders**, whatever they are named.
+5. On macOS, `~/Library/Preferences/houdini`.
+
+Several `houdiniXX.X` folders usually exist at once — redirection leaves
+empty decoys behind, and old locations keep stale copies. Candidates are
+ranked by whether they hold loose files (a live folder does; a leftover
+holds only empty subfolders, sometimes even an empty `packages`), then by
+preference markers, then by how recently they were written. Only the best
+of each version is preselected; the rest stay listed and selectable.
 
 ### Commands
 

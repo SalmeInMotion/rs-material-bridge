@@ -155,11 +155,49 @@ def _houdini_pref_score(path):
     return (has_content, score, mtime)
 
 
+def _explicit_pref_dirs():
+    """Folders named by HOUDINI_USER_PREF_DIR. When a studio (or the user)
+    sets it, it overrides every default location, so it wins. The variable
+    may contain the __HVER__ token standing for the version."""
+    raw = os.environ.get("HOUDINI_USER_PREF_DIR", "").strip()
+    if not raw:
+        return []
+    out = []
+    for entry in raw.split(os.pathsep):
+        entry = os.path.expandvars(entry.strip())
+        if not entry:
+            continue
+        if "__HVER__" in entry:
+            parent = os.path.dirname(entry)
+            prefix, _sep, suffix = os.path.basename(entry).partition(
+                "__HVER__")
+            try:
+                names = os.listdir(parent)
+            except OSError:
+                continue
+            for name in names:
+                if name.startswith(prefix) and name.endswith(suffix):
+                    path = os.path.join(parent, name)
+                    if os.path.isdir(path):
+                        out.append(path)
+        elif os.path.isdir(entry):
+            out.append(entry)
+    return out
+
+
 def find_houdini_prefs():
     """Return [(label, path, preselect)] of Houdini preference folders,
     newest version first, with only the most plausible folder of each
     version preselected."""
     found = {}
+    explicit = set()
+    for path in _explicit_pref_dirs():
+        name = os.path.basename(path.rstrip("\\/"))
+        ver = name[len("houdini"):] if name.lower().startswith("houdini") \
+            else name
+        key = os.path.normcase(path)
+        found[key] = (ver or name, path)
+        explicit.add(key)
     for parent in _candidate_doc_dirs():
         try:
             entries = os.listdir(parent)
@@ -190,12 +228,20 @@ def find_houdini_prefs():
 
     out = []
     for ver in sorted(by_version, key=ver_key, reverse=True):
-        paths = sorted(by_version[ver], key=_houdini_pref_score,
-                       reverse=True)
+        # HOUDINI_USER_PREF_DIR overrides every default location, so those
+        # folders sort first and are the only ones preselected when set.
+        paths = sorted(
+            by_version[ver],
+            key=lambda p: (os.path.normcase(p) in explicit,
+                           _houdini_pref_score(p)),
+            reverse=True)
         for i, path in enumerate(paths):
-            # Only the best candidate of each version is preselected, and
-            # never an empty folder (a leftover, not a live install).
-            preselect = (i == 0 and _houdini_pref_score(path)[0] == 1)
+            if explicit:
+                preselect = os.path.normcase(path) in explicit
+            else:
+                # Best candidate of each version, never an empty folder
+                # (a leftover rather than a live installation).
+                preselect = (i == 0 and _houdini_pref_score(path)[0] == 1)
             out.append(("Houdini %s" % ver, path, preselect))
     return out
 

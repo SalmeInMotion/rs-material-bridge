@@ -45,52 +45,99 @@ C4D_SCRIPT_FILES = ("rs_bridge_c4d_core.py", "rs_mat_copy.py",
 # ---------------------------------------------------------------------------
 # Supported versions
 #
-# The bridge is only useful where Redshift itself runs, so the ceiling and
-# floor are Redshift's, not ours -- checked against Maxon's own docs
-# (2026-09):
-#   * Redshift 2026.0.0 "Dropped support for Cinema 4D R25 and S26".
-#   * Redshift for Houdini supports 19.0 / 19.5 / 20.0 / 20.5 / 21.0 only;
-#     Houdini 22 has no Redshift plugin yet.
-# Below that ceiling we only claim what this tool's own API use is known
-# to hold for: the C4D node-graph calls it relies on are the 2024+ ones.
+# The bridge only works where Redshift works, and the installed Redshift
+# states exactly which hosts it ships plugins for -- one folder per host
+# version under <Redshift>/Plugins. Reading that beats hardcoding a table
+# that goes stale every release (Maxon's own docs lagged behind their
+# installer when this was written).
+#
+# The only floor of our own is Cinema 4D 2024: the node graph calls the
+# C4D side relies on are the 2024+ ones.
 # ---------------------------------------------------------------------------
 
-HOUDINI_MIN_SERIES = (20, 5)
-HOUDINI_MAX_SERIES = (21, 0)
 C4D_MIN_YEAR = 2024
 
+# Used only when no Redshift installation can be found.
+FALLBACK_HOUDINI_SERIES = {"19.5", "20.0", "20.5", "21.0", "22.0"}
+FALLBACK_C4D_TOKENS = {"2024", "2025", "2026"}
 
-def _series_tuple(series):
-    try:
-        parts = [int(p) for p in series.split(".")]
-    except ValueError:
+
+def find_redshift_roots():
+    """Standalone Redshift installations (the ones carrying host plugins;
+    the copy bundled inside Cinema 4D does not)."""
+    roots = []
+    for base in _program_dirs():
+        try:
+            names = os.listdir(base)
+        except OSError:
+            continue
+        for name in names:
+            if not re.match(r"^(Maxon )?Redshift", name, re.IGNORECASE):
+                continue
+            path = os.path.join(base, name)
+            if os.path.isdir(os.path.join(path, "Plugins")):
+                roots.append(path)
+    return sorted(roots, reverse=True)
+
+
+def redshift_hosts():
+    """{'houdini': {series}, 'c4d': {token}} taken from the installed
+    Redshift, or None when Redshift cannot be found."""
+    roots = find_redshift_roots()
+    if not roots:
         return None
-    while len(parts) < 2:
-        parts.append(0)
-    return tuple(parts[:2])
+    hou_series, c4d_tokens = set(), set()
+    for root in roots:
+        hou_dir = os.path.join(root, "Plugins", "Houdini")
+        try:
+            for name in os.listdir(hou_dir):
+                m = re.match(r"^(\d+)\.(\d+)(?:\.\d+)?$", name)
+                if m:
+                    hou_series.add("%s.%s" % (m.group(1), m.group(2)))
+        except OSError:
+            pass
+        c4d_dir = os.path.join(root, "Plugins", "C4D")
+        try:
+            for name in os.listdir(c4d_dir):
+                m = re.match(r"^R?(\d{4}|\d{2})$", name)
+                if m:
+                    c4d_tokens.add(m.group(1))
+        except OSError:
+            pass
+    if not hou_series and not c4d_tokens:
+        return None
+    return {"houdini": hou_series, "c4d": c4d_tokens}
+
+
+_HOSTS_CACHE = []
+
+
+def _hosts():
+    if not _HOSTS_CACHE:
+        _HOSTS_CACHE.append(redshift_hosts())
+    return _HOSTS_CACHE[0]
 
 
 def houdini_support(series):
     """(supported, reason) for a Houdini version series like '21.0'."""
-    st = _series_tuple(series)
-    if st is None:
-        return False, "unrecognised version"
-    if st > HOUDINI_MAX_SERIES:
-        return False, "Redshift has no plugin for Houdini %d yet" % st[0]
-    if st < HOUDINI_MIN_SERIES:
-        return False, "needs Houdini %d.%d or newer" % HOUDINI_MIN_SERIES
-    return True, ""
+    hosts = _hosts()
+    known = hosts["houdini"] if hosts else FALLBACK_HOUDINI_SERIES
+    if series in known:
+        return True, ""
+    return False, "no Redshift plugin for Houdini %s" % series
 
 
 def c4d_support(token):
     """(supported, reason) for a C4D version token like '2026' or 'R25'."""
-    if re.match(r"^\d{4}$", token):
-        if int(token) < C4D_MIN_YEAR:
-            return False, "needs Cinema 4D %d or newer" % C4D_MIN_YEAR
+    if not re.match(r"^\d{4}$", token):
+        return False, "Redshift no longer supports %s" % token
+    if int(token) < C4D_MIN_YEAR:
+        return False, "needs Cinema 4D %d or newer" % C4D_MIN_YEAR
+    hosts = _hosts()
+    known = hosts["c4d"] if hosts else FALLBACK_C4D_TOKENS
+    if token in known:
         return True, ""
-    if re.match(r"^[RS]\d+$", token, re.IGNORECASE):
-        return False, "Redshift dropped support for %s" % token
-    return False, "unrecognised version"
+    return False, "no Redshift plugin for Cinema 4D %s" % token
 
 
 def _tool_version():
@@ -413,13 +460,9 @@ def houdini_targets():
             chosen = os.path.join(docs[0], "houdini%s" % series)
         if series not in installs:
             continue  # leftover preferences of an uninstalled version
-        supported, reason = houdini_support(series)
+        supported, _reason = houdini_support(series)
         if supported:
             out.append(("Houdini %s" % series, chosen, True))
-        else:
-            # Installed but out of scope: say why rather than stay silent,
-            # or it looks like the installer failed to see it.
-            out.append(("Houdini %s  -- %s" % (series, reason), "", False))
     return out
 
 
@@ -447,10 +490,10 @@ def c4d_targets():
     for token in sorted(installs, key=token_key, reverse=True):
         path = prefs.get(token)
         label = "Cinema 4D %s" % token
-        supported, reason = c4d_support(token)
+        supported, _reason = c4d_support(token)
         if not supported:
-            out.append((label + "  -- " + reason, "", False))
-        elif path is None:
+            continue  # a version Redshift no longer serves: not our business
+        if path is None:
             # Installed but never launched: only C4D itself can create the
             # preference folder, whose name carries a per-install hash.
             out.append((label + "  (launch it once first)", "", False))
@@ -658,6 +701,13 @@ class InstallerUI(object):
         self.log("Installing from: %s" % REPO_DIR)
         self.log("Nothing is written outside your Houdini / C4D preference "
                  "folders.")
+        roots = find_redshift_roots()
+        if roots:
+            self.log("Redshift found: %s" % roots[0])
+        else:
+            self.log("NOTE: no Redshift installation found. The bridge "
+                     "needs Redshift in both applications; the versions "
+                     "offered above are a best guess.")
 
     def _app_section(self, parent, title, found, empty_hint):
         box = ttk.LabelFrame(parent, text=title, padding=10)

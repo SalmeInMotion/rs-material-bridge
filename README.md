@@ -17,17 +17,26 @@ output wiring) to a small JSON file and rebuilds it natively on the other side.
 
 ## Supported versions
 
-| | Supported | Why not the rest |
-|---|---|---|
-| **Houdini** | 20.5, 21.0 | **Houdini 22 has no Redshift plugin yet** — Redshift's Houdini builds stop at 21.0. Redshift still ships a final build for 19.0/19.5/20.0, but this tool is not verified there. |
-| **Cinema 4D** | 2024, 2025, 2026 | Redshift 2026.0.0 **dropped support for R25 and S26**. Cinema 4D 2023 runs Redshift, but the node-graph API this tool uses is only known-good from 2024 on. |
+Whatever your Redshift supports, minus one floor of our own.
 
-Verified in production by the author: **Houdini 21.0.700** and **Cinema 4D
-2024.4 / 2026**. The other versions in the supported column share the same
-APIs but have not been exercised — please report anything odd.
+The installer reads the host plugins your Redshift actually ships
+(`<Redshift>/Plugins/Houdini/*` and `.../C4D/*`) instead of carrying a
+version table that goes stale — Maxon's published docs lagged a release
+behind their own installer while this was written, so the installation on
+disk is the only source worth trusting.
 
-The installer lists any unsupported version it finds with the reason, so a
-missing entry always means "not installed", never "not detected".
+- **Houdini** — every series Redshift has a plugin for (19.0 through 22.0
+  with Redshift 2026).
+- **Cinema 4D** — every version Redshift has a plugin for, from **2024**
+  up. 2023 is excluded on our side: the node-graph API this tool uses is
+  only known-good from 2024 on. R25/S26 are gone from Redshift itself.
+
+Verified by the author: **Houdini 21.0.700 and 22.0.368**, **Cinema 4D
+2024.4 and 2026**. The rest share the same APIs but have not been
+exercised — please report anything odd.
+
+If no Redshift installation is found, the installer says so and falls back
+to a conservative built-in list.
 
 ## Setup
 

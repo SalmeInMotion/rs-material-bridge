@@ -361,11 +361,9 @@ def houdini_targets():
             docs = _registry_documents() or [os.path.join(_home(),
                                                           "Documents")]
             chosen = os.path.join(docs[0], "houdini%s" % series)
-        installed = series in installs
-        label = "Houdini %s" % series
-        if not installed:
-            label += "  (not installed)"
-        out.append((label, chosen, installed))
+        if series not in installs:
+            continue  # leftover preferences of an uninstalled version
+        out.append(("Houdini %s" % series, chosen, True))
     return out
 
 
@@ -390,17 +388,15 @@ def c4d_targets():
         return (0, 0)
 
     out = []
-    for token in sorted(set(installs) | set(prefs), key=token_key,
-                        reverse=True):
+    for token in sorted(installs, key=token_key, reverse=True):
         path = prefs.get(token)
-        installed = token in installs
         label = "Cinema 4D %s" % token
         if path is None:
+            # Installed but never launched: only C4D itself can create the
+            # preference folder, whose name carries a per-install hash.
             out.append((label + "  (launch it once first)", "", False))
         else:
-            if not installed:
-                label += "  (not installed)"
-            out.append((label, path, installed))
+            out.append((label, path, True))
     return out
 
 
@@ -476,50 +472,80 @@ def _c4d_plugin_dir(prefs):
     return os.path.join(prefs, "plugins", C4D_FOLDER_NAME)
 
 
+def _is_link(path):
+    """True for symlinks *and* Windows directory junctions.
+
+    os.path.islink() returns False for a junction (it is a reparse point,
+    not a symlink) and os.path.isjunction() only exists on Python 3.12+,
+    so the portable test is whether the resolved path differs."""
+    try:
+        if os.path.islink(path):
+            return True
+        isjunction = getattr(os.path, "isjunction", None)
+        if isjunction is not None and isjunction(path):
+            return True
+        if not os.path.exists(path):
+            return False
+        return (os.path.normcase(os.path.realpath(path)) !=
+                os.path.normcase(os.path.abspath(path)))
+    except OSError:
+        return False
+
+
+def _refresh_dir(dest, files, log, what):
+    """Replace `dest` with copies of `files`. Links are left alone (a
+    developer setup pointing at the repo), and a folder that cannot be
+    cleared -- typically because the application is open -- reports that
+    instead of aborting the whole install."""
+    if _is_link(dest):
+        log("C4D: %s at '%s' is a link, left untouched" % (what, dest))
+        return True
+    if os.path.isdir(dest):
+        try:
+            shutil.rmtree(dest)
+        except OSError as e:
+            log("C4D: could not replace %s (%s)" % (what, e))
+            log("     close Cinema 4D and run the installer again")
+            return False
+    os.makedirs(dest, exist_ok=True)
+    for src in files:
+        if not os.path.isfile(src):
+            continue
+        target = os.path.join(dest, os.path.basename(src))
+        try:
+            shutil.copy2(src, target)
+        except shutil.SameFileError:
+            pass  # installing onto itself
+    log("C4D: %s -> %s" % (what, dest))
+    return True
+
+
 def install_c4d(prefs, log, with_menu=True):
-    dest = _c4d_script_dir(prefs)
-    if os.path.islink(dest) or (os.path.isdir(dest) and
-                                not os.path.isfile(
-                                    os.path.join(dest, "__installed__"))):
-        # A junction/symlink (developer setup) or a previous copy: leave
-        # links alone, refresh copies.
-        if os.path.islink(dest):
-            log("C4D: '%s' is a link, left untouched" % dest)
-        else:
-            shutil.rmtree(dest, ignore_errors=True)
-    if not os.path.islink(dest):
-        os.makedirs(dest, exist_ok=True)
-        for name in C4D_SCRIPT_FILES:
-            src = os.path.join(C4D_SRC_DIR, name)
-            if os.path.isfile(src):
-                shutil.copy2(src, os.path.join(dest, name))
-        with open(os.path.join(dest, "__installed__"), "w",
-                  encoding="utf-8") as f:
-            f.write("installed by %s installer\n" % APP_NAME)
-        log("C4D: scripts -> %s" % dest)
+    """Scripts and menu plugin are installed independently: a failure in
+    one must not silently cost the user the other."""
+    ok = _refresh_dir(
+        _c4d_script_dir(prefs),
+        [os.path.join(C4D_SRC_DIR, n) for n in C4D_SCRIPT_FILES],
+        log, "scripts")
 
     if with_menu:
-        pdest = _c4d_plugin_dir(prefs)
-        if os.path.isdir(pdest) and not os.path.islink(pdest):
-            shutil.rmtree(pdest, ignore_errors=True)
-        if not os.path.islink(pdest):
-            os.makedirs(pdest, exist_ok=True)
-            for name in os.listdir(C4D_PLUGIN_SRC):
-                src = os.path.join(C4D_PLUGIN_SRC, name)
-                if os.path.isfile(src):
-                    shutil.copy2(src, os.path.join(pdest, name))
-            # The plugin imports the core module from next to itself.
-            shutil.copy2(os.path.join(C4D_SRC_DIR, "rs_bridge_c4d_core.py"),
-                         os.path.join(pdest, "rs_bridge_c4d_core.py"))
-            log("C4D: menu plugin -> %s" % pdest)
+        plugin_files = [os.path.join(C4D_PLUGIN_SRC, n)
+                        for n in sorted(os.listdir(C4D_PLUGIN_SRC))]
+        # The plugin imports the core module from next to itself.
+        plugin_files.append(os.path.join(C4D_SRC_DIR,
+                                         "rs_bridge_c4d_core.py"))
+        if _refresh_dir(_c4d_plugin_dir(prefs), plugin_files, log,
+                        "menu plugin"):
             log("     menu 'RS Bridge' will appear on restart")
-    return True
+        else:
+            ok = False
+    return ok
 
 
 def uninstall_c4d(prefs, log):
     removed = False
     for path in (_c4d_script_dir(prefs), _c4d_plugin_dir(prefs)):
-        if os.path.islink(path):
+        if _is_link(path):
             log("C4D: '%s' is a link, left untouched" % path)
             continue
         if os.path.isdir(path):

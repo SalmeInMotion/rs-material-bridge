@@ -85,10 +85,17 @@ def _log(msg):
 def write_clip(data):
     if not os.path.isdir(BRIDGE_DIR):
         os.makedirs(BRIDGE_DIR)
+    text = json.dumps(data, indent=2, ensure_ascii=False)
     tmp = CLIP_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write(text)
     os.replace(tmp, CLIP_FILE)  # atomic: never a half-written clipboard
+    # Also on the system clipboard: reporting a problem is then just
+    # Ctrl+V, with no hunting for the file.
+    try:
+        c4d.CopyStringToClipboard(text)
+    except Exception as e:
+        _log("note: could not put the copy on the system clipboard (%s)" % e)
 
 
 def read_clip():
@@ -194,8 +201,58 @@ def graph_nodes(graph):
                 except Exception:
                     nodes.append(c)
         if nodes:
-            return nodes
+            return _with_grouped_nodes(nodes)
     return []
+
+
+def _with_grouped_nodes(nodes, depth=0):
+    """Flatten node groups into the list. Grouping is organisation, not
+    shading -- but the shader nodes inside a group are real, and leaving
+    them behind silently loses part of the material."""
+    if depth > 12:
+        return nodes
+    out = []
+    for n in nodes:
+        out.append(n)
+        nested = child_nodes(n)
+        if nested:
+            out.extend(_with_grouped_nodes(nested, depth + 1))
+    return out
+
+
+def node_uid(node):
+    """Identity of a graph node, unique across the whole material.
+
+    Ids are only unique within their enclosing group, so copies of the
+    same group hold nodes with identical ids -- flattening them by id
+    collapses three nodes into one and every connection lands on the same
+    node. The path carries the enclosing groups, so it does not."""
+    path = _try_call(node, "GetPath")
+    if path is not None and not _is_null(path):
+        text = str(path)
+        if text:
+            return text
+    return str(_try_call(node, "GetId") or "")
+
+
+def node_kind(node):
+    """Leading part of a graph node's id: 'texturesampler', 'reroute',
+    'group', 'scaffold', 'type'..."""
+    nid = str(_try_call(node, "GetId") or "")
+    return nid.split("@")[0] if "@" in nid else nid
+
+
+def child_nodes(node):
+    """Nodes nested inside `node` -- non-empty only for groups, whose other
+    children are the two port containers."""
+    out = []
+    for c in _children(node):
+        try:
+            if c.GetKind() == maxon.NODE_KIND.NODE:
+                out.append(c)
+        except Exception:
+            continue
+    return out
 
 
 def node_asset_id(node):
@@ -414,6 +471,50 @@ def _via_out_list(port, direction):
     return conns
 
 
+def trace_source(port, depth=0):
+    """Follow a connection back through wiring. Returns
+    (shader_port, last_port_seen).
+
+    Cinema 4D graphs are full of wiring that carries no shading: reroutes,
+    type converters, and group boundaries (which nest). None of those
+    exist in Houdini, so a connection passing through one has to be traced
+    to whatever actually produces the value, or it is lost along with
+    everything upstream. When the trail ends on a port holding a plain
+    value instead of a node -- a group input exposing a constant -- that
+    port is handed back so the value can travel as a parameter."""
+    if port is None or depth > 24:
+        return None, None
+    node = _owning_node(port)
+    if node is None:
+        return None, port
+    if node_asset_id(node) is not None:
+        return port, port            # a real shader node: done
+
+    # Group boundary ports answer on the port itself, in both directions.
+    for src in input_sources(port):
+        found, last = trace_source(src, depth + 1)
+        if found is not None:
+            return found, last
+
+    # Pass-through node (reroute, type converter): continue from its input.
+    inputs = _try_call(node, "GetInputs")
+    if inputs is not None and not _is_null(inputs):
+        for _parts, p, _leaf in walk_ports(inputs):
+            for src in input_sources(p):
+                found, last = trace_source(src, depth + 1)
+                if found is not None:
+                    return found, last
+            if _port_value(p) is not None:
+                port = p           # remember the deepest value we saw
+    return None, port
+
+
+def resolve_source(port, depth=0):
+    """Shader port feeding `port`, or None when the wiring carries a plain
+    value rather than a node."""
+    return trace_source(port, depth)[0]
+
+
 def _src_port_dotted(port):
     """Dotted path of an output port below its owning node (e.g.
     'outcolor.r'), so nested sub-outputs survive the round-trip. Climbs
@@ -433,6 +534,10 @@ def _src_port_dotted(port):
             segs.append(_last_segment(cur))
         cur = _try_call(cur, "GetParent")
     segs.reverse()
+    # The first segment is the port container itself ('>' for outputs,
+    # '<' for inputs), which is not part of the port's name.
+    while segs and segs[0] in (">", "<"):
+        segs.pop(0)
     if segs:
         return ".".join(segs).lower()
     return _last_segment(port).lower()
@@ -728,8 +833,14 @@ def build_material(mat, warnings):
     for node in all_nodes:
         aid = node_asset_id(node)
         if aid is None:
-            warnings.append("node with unknown asset id skipped (%s)"
-                            % str(_try_call(node, "GetId")))
+            # Wiring and decoration, not shading: reroutes and type
+            # converters are traced through when resolving connections,
+            # groups are flattened, scaffolds are just backdrops. None of
+            # them is a loss, so none of them is worth a warning.
+            kind = node_kind(node)
+            if kind not in ("reroute", "type", "group", "scaffold", ""):
+                warnings.append("node of unknown kind '%s' skipped (%s)"
+                                % (kind, str(_try_call(node, "GetId"))))
             continue
         if aid == RS_OUTPUT_ID or aid.endswith("node.output"):
             out_node = node
@@ -746,7 +857,7 @@ def build_material(mat, warnings):
 
     for i, (node, aid) in enumerate(exportable):
         key = "n%d" % i
-        keys[str(node.GetId())] = key
+        keys[node_uid(node)] = key
         cls = aid.split(".")[-1]
         params = {}
         unserializable = []
@@ -769,13 +880,28 @@ def build_material(mat, warnings):
                 if srcs:
                     got_any_connection[0] = True
                     for src_port in srcs:
-                        src_node = _owning_node(src_port)
+                        real, last = trace_source(src_port)
+                        if real is None:
+                            # Wiring carrying a constant (a group input
+                            # exposing a value): keep the value, which is
+                            # what the material actually renders with.
+                            val = to_jsonable(_port_value(last)) \
+                                if last is not None else None
+                            if val is not None:
+                                params[dotted.lower()] = val
+                            else:
+                                warnings.append(
+                                    "%s: input '%s' comes through wiring "
+                                    "with nothing behind it"
+                                    % (node_display_name(node), dotted))
+                            continue
+                        src_node = _owning_node(real)
                         if src_node is None:
                             continue
                         connections.append({
-                            "_dst_gid": str(node.GetId()),
-                            "_src_gid": str(src_node.GetId()),
-                            "src_port": _src_port_dotted(src_port),
+                            "_dst_gid": node_uid(node),
+                            "_src_gid": node_uid(src_node),
+                            "src_port": _src_port_dotted(real),
                             "dst_port": dotted.lower(),
                         })
                     continue
@@ -826,9 +952,10 @@ def build_material(mat, warnings):
                 for role in ("surface", "displacement", "volume",
                              "environment"):
                     if role in slot:
-                        src_node = _owning_node(srcs[0])
+                        real = resolve_source(srcs[0])
+                        src_node = _owning_node(real) if real else None
                         if src_node is not None:
-                            k = keys.get(str(src_node.GetId()))
+                            k = keys.get(node_uid(src_node))
                             if k:
                                 outputs[role] = k
                         break

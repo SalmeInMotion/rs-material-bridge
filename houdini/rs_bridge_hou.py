@@ -91,10 +91,19 @@ _TEX_PARM_RE = re.compile(r"^tex\d+$", re.IGNORECASE)
 def _write_clip(data):
     if not os.path.isdir(BRIDGE_DIR):
         os.makedirs(BRIDGE_DIR)
+    text = json.dumps(data, indent=2, ensure_ascii=False)
     tmp = CLIP_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write(text)
     os.replace(tmp, CLIP_FILE)  # atomic: never a half-written clipboard
+    # Also on the system clipboard: reporting a problem is then just
+    # Ctrl+V, with no hunting for the file.
+    try:
+        if hou.isUIAvailable():
+            hou.ui.copyTextToClipboard(text)
+    except (hou.Error, AttributeError) as e:
+        print("[RS Bridge] note: could not put the copy on the system "
+              "clipboard (%s)" % e)
 
 
 def _read_clip():

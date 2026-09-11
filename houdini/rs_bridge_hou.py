@@ -788,6 +788,7 @@ def build_hou_material(mat, matnet, type_map, warnings):
         out_node = builder.createNode("redshift_material")
 
     built = {}
+    wired = 0
     has_pos = False
     for nd in mat["nodes"]:
         cls = nd["class"]
@@ -829,6 +830,7 @@ def build_hou_material(mat, matnet, type_map, warnings):
             continue
         try:
             dst.setInput(in_idx, src, out_idx)
+            wired += 1
         except hou.Error as e:
             warnings.append("connect %s -> %s.%s failed: %s"
                             % (src.name(), dst.name(), conn["dst_port"], e))
@@ -851,9 +853,10 @@ def build_hou_material(mat, matnet, type_map, warnings):
     if not has_pos:
         builder.layoutChildren()
     builder.setMaterialFlag(True)
-    n_wires = sum(1 for c in mat.get("connections", [])
-                  if built.get(c["src"]) and built.get(c["dst"]))
-    return builder, len(built), n_wires
+    # Counting connections that *succeeded*, not ones whose endpoints
+    # merely exist -- otherwise a failed wire still reads as 29 of 29 and
+    # the report hides exactly what it is meant to reveal.
+    return builder, len(built), wired
 
 
 def import_materials(data, dest="/mat"):

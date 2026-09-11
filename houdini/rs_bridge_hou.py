@@ -198,6 +198,40 @@ def _find_builder(node):
 # Export
 # ---------------------------------------------------------------------------
 
+# Cinema 4D names colour spaces with Redshift's own tokens; Houdini lists
+# the colour spaces of the active OCIO config. Neither knows the other's
+# vocabulary, and a name Houdini does not recognise means the texture is
+# read with the wrong transfer curve.
+_RS_COLORSPACE_ALIASES = {
+    "rs_input_colorspace_raw": ("Raw", "raw", "data", "Utility - Raw"),
+    "rs_input_colorspace_srgb": ("sRGB - Texture", "sRGB", "srgb_tex",
+                                 "Utility - sRGB - Texture"),
+    "rs_input_colorspace_srgb_linear": ("Linear Rec.709 (sRGB)",
+                                        "scene_linear", "Utility - Linear - sRGB",
+                                        "lin_srgb"),
+}
+
+
+def _normalise(text):
+    return re.sub(r"[^a-z0-9]", "", str(text).lower())
+
+
+def _menu_equivalent(value, menu):
+    """Entry of `menu` meaning the same as `value`, or None."""
+    if value in menu:
+        return value
+    for candidate in _RS_COLORSPACE_ALIASES.get(str(value).lower(), ()):
+        if candidate in menu:
+            return candidate
+    wanted = _normalise(value)
+    if not wanted:
+        return None
+    for item in menu:
+        if _normalise(item) == wanted:
+            return item
+    return None
+
+
 def _export_ramp(ramp, node_name, warnings):
     """hou.Ramp -> interchange dict."""
     to_canon, _from_canon, lossy = _hou_basis_maps()
@@ -573,6 +607,31 @@ def _set_parm(pt, value, node_label, warnings):
             pad = [1.0]  # RGB -> RGBA: alpha defaults to opaque
         vals = vals + pad
     vals = vals[:n]
+
+    # Menu parms accept any string, so a name from the other application
+    # would be stored verbatim and silently ignored by the renderer. The
+    # menu has to be consulted before setting, not after failing.
+    is_string = (pt.parmTemplate().type() == hou.parmTemplateType.String)
+    if is_string:
+        try:
+            menu = pt[0].menuItems()
+        except hou.Error:
+            menu = ()
+        if menu:
+            wanted = vals[0] if isinstance(vals[0], str) else str(vals[0])
+            equivalent = _menu_equivalent(wanted, menu)
+            if equivalent is None:
+                warnings.append(
+                    "%s: '%s' is not one of the options Houdini offers for "
+                    "'%s', so it keeps its default -- set it by hand if it "
+                    "matters" % (node_label, wanted, pt.name()))
+                return False
+            if equivalent != wanted:
+                warnings.append("%s: '%s' translated to '%s' for '%s'"
+                                % (node_label, wanted, equivalent,
+                                   pt.name()))
+            vals = [equivalent] + list(vals[1:])
+
     try:
         pt.set(tuple(vals))
         return True
@@ -583,7 +642,6 @@ def _set_parm(pt, value, node_label, warnings):
     # the same integers Cinema 4D stores -- so converting a number to its
     # string is exact whenever it names a real menu entry, and only the
     # cases that are genuinely a guess are worth reporting.
-    is_string = (pt.parmTemplate().type() == hou.parmTemplateType.String)
     for conv in ((str,) if is_string else (float, int)):
         try:
             coerced = tuple(conv(v) for v in vals)
@@ -596,8 +654,10 @@ def _set_parm(pt, value, node_label, warnings):
             except hou.Error:
                 menu = ()
             if menu:
-                if coerced[0] not in menu:
+                equivalent = _menu_equivalent(coerced[0], menu)
+                if equivalent is None:
                     break  # not a valid option: report the failure below
+                coerced = (equivalent,) + coerced[1:]
                 exact = True
         try:
             pt.set(coerced)

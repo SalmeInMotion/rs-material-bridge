@@ -513,31 +513,25 @@ def trace_source(port, depth=0):
     everything upstream. When the trail ends on a port holding a plain
     value instead of a node -- a group input exposing a constant -- that
     port is handed back so the value can travel as a parameter."""
-    if port is None or depth > 24:
-        return None, None
-    node = _owning_node(port)
-    if node is None:
+    if port is None or depth > 32:
         return None, port
-    if node_asset_id(node) is not None:
+    node = _owning_node(port)
+    if node is not None and node_asset_id(node) is not None:
         return port, port            # a real shader node: done
 
-    # Group boundary ports answer on the port itself, in both directions.
+    # Every kind of wiring answers on the port itself -- a reroute's own
+    # output leads to its input, a group's boundary port leads to the
+    # other side -- so following the port is all it takes. Reaching for
+    # the node's other ports instead would pick up an unrelated sibling's
+    # value, which is how a mix amount of 1 once became 0.
+    terminal = port
     for src in input_sources(port):
         found, last = trace_source(src, depth + 1)
         if found is not None:
             return found, last
-
-    # Pass-through node (reroute, type converter): continue from its input.
-    inputs = _try_call(node, "GetInputs")
-    if inputs is not None and not _is_null(inputs):
-        for _parts, p, _leaf in walk_ports(inputs):
-            for src in input_sources(p):
-                found, last = trace_source(src, depth + 1)
-                if found is not None:
-                    return found, last
-            if _port_value(p) is not None:
-                port = p           # remember the deepest value we saw
-    return None, port
+        if last is not None:
+            terminal = last
+    return None, terminal
 
 
 def resolve_source(port, depth=0):
@@ -948,6 +942,29 @@ def to_jsonable(v):
     return None
 
 
+# Houdini names colour spaces after the active OCIO config; Cinema 4D uses
+# Redshift's own tokens. Translating keeps textures on the right transfer
+# curve instead of silently defaulting.
+_OCIO_TO_RS_COLORSPACE = {
+    "raw": "RS_INPUT_COLORSPACE_RAW",
+    "data": "RS_INPUT_COLORSPACE_RAW",
+    "utilityraw": "RS_INPUT_COLORSPACE_RAW",
+    "srgbtexture": "RS_INPUT_COLORSPACE_SRGB",
+    "srgb": "RS_INPUT_COLORSPACE_SRGB",
+    "linearrec709srgb": "RS_INPUT_COLORSPACE_SRGB_LINEAR",
+    "scenelinear": "RS_INPUT_COLORSPACE_SRGB_LINEAR",
+}
+
+
+def translate_colorspace(value):
+    """Redshift colour space token for a name coming from another host."""
+    text = str(value or "")
+    if text.upper().startswith("RS_INPUT_COLORSPACE"):
+        return text
+    key = re.sub(r"[^a-z0-9]", "", text.lower())
+    return _OCIO_TO_RS_COLORSPACE.get(key, text)
+
+
 def convert_like(current, value):
     """Convert a JSON `value` to the type of the port's current value."""
     if isinstance(current, maxon.Url) or (
@@ -1304,6 +1321,8 @@ def build_c4d_material(mat_json, warnings):
                 if isinstance(pval, dict) and pval.get("_kind") == RAMP_KIND:
                     import_ramp(port, pval, nd.get("name") or "", warnings)
                     continue
+                if pname.endswith("colorspace"):
+                    pval = translate_colorspace(pval)
                 current = _port_value(port)
                 converted = convert_like(current, pval)
                 if current is None and isinstance(pval, str) \

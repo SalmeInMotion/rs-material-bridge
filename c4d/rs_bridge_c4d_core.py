@@ -559,6 +559,58 @@ def _warn_conn_api_once(warnings):
 # Value conversion
 # ---------------------------------------------------------------------------
 
+_ASSET_HASH_RE = re.compile(r"(file_[A-Za-z0-9]+)")
+_asset_cache_index = {}
+
+
+def _asset_cache_roots():
+    roots = []
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        roots.append(os.path.join(appdata, "Maxon", "_assetcache"))
+    roots.append(os.path.join(os.path.expanduser("~"), "Library",
+                              "Preferences", "Maxon", "_assetcache"))
+    return [r for r in roots if os.path.isdir(r)]
+
+
+def resolve_asset_url(url_text):
+    """Real file behind an 'asset:///' texture, or None.
+
+    Materials from the Asset Browser do not reference files on disk: the
+    texture lives in an asset database and its path is a mangled id that
+    means nothing outside Cinema 4D. The bytes are cached locally though,
+    so the file can be found by its id and handed over as a normal path."""
+    m = _ASSET_HASH_RE.search(url_text or "")
+    if m is None:
+        return None
+    key = m.group(1)
+    if key in _asset_cache_index:
+        return _asset_cache_index[key]
+
+    found = None
+    for root in _asset_cache_roots():
+        for db in os.listdir(root):
+            folder = os.path.join(root, db, key)
+            if not os.path.isdir(folder):
+                continue
+            for dirpath, _dirs, files in os.walk(folder):
+                for name in files:
+                    stem, ext = os.path.splitext(name)
+                    # 'asset.<ext>' is the payload; the rest is metadata
+                    # such as the preview image.
+                    if stem.lower() == "asset" and ext:
+                        found = os.path.join(dirpath, name)
+                        break
+                if found:
+                    break
+            if found:
+                break
+        if found:
+            break
+    _asset_cache_index[key] = found
+    return found
+
+
 def _url_from_path(path):
     s = str(path)
     if s.lower().startswith(("file:", "asset:", "http:", "https:")):
@@ -721,13 +773,17 @@ def to_jsonable(v):
     if isinstance(v, str):
         return v
     if isinstance(v, maxon.Url):
+        raw = str(v)
+        if raw.lower().startswith("asset:"):
+            # GetSystemPath() on an asset URL yields the mangled id, which
+            # is useless anywhere else -- resolve it to the cached file, or
+            # keep the whole URL so the caller can say what is wrong.
+            return resolve_asset_url(raw) or raw
         try:
             s = v.GetSystemPath()
         except Exception:
             s = None
-        if not s:
-            s = str(v)  # asset:/// etc.: keep the raw URL rather than drop
-        return s or None
+        return (s or raw) or None
     # maxon scalar/string wrappers (maxon.String, maxon.Int32, ...) are not
     # subclasses of the Python types, so isinstance() above misses them.
     tn = type(v).__name__.lower()
@@ -915,6 +971,13 @@ def build_material(mat, warnings):
                     continue
                 params[dotted.lower()] = val
         nname = node_display_name(node)
+        for pname, pval in params.items():
+            if isinstance(pval, str) and pval.lower().startswith("asset:"):
+                warnings.append(
+                    "%s: '%s' points into the Cinema 4D Asset Browser and "
+                    "no cached copy was found, so the texture will be "
+                    "missing. Use File > Save Project with Assets to write "
+                    "the textures to disk first." % (nname, pname))
         if unserializable:
             shown = ", ".join(unserializable[:6])
             if len(unserializable) > 6:

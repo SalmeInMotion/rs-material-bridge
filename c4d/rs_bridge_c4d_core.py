@@ -17,6 +17,7 @@ Run via the thin wrapper scripts rs_mat_copy.py / rs_mat_paste.py.
 import json
 import os
 import re
+import shutil
 import time
 import traceback
 
@@ -54,6 +55,11 @@ BRIDGE_DIR = os.environ.get(
 CLIP_FILE = os.path.join(BRIDGE_DIR, "clipboard.json")
 CLASSES_SELF_FILE = os.path.join(BRIDGE_DIR, "classes_c4d.json")
 CLASSES_OTHER_FILE = os.path.join(BRIDGE_DIR, "classes_houdini.json")
+PREFS_FILE = os.path.join(BRIDGE_DIR, "preferences.json")
+
+# Folder created under the preferences' default path for textures that do
+# not exist as files until the bridge writes them out.
+ASSET_EXPORT_FOLDER = "C4D - Asset Browser"
 
 # Same node, different class name per app (verified via the class dumps).
 CLASS_ALIASES = {"rsosl": "osl"}        # interchange class -> local class
@@ -96,6 +102,31 @@ def write_clip(data):
         c4d.CopyStringToClipboard(text)
     except Exception as e:
         _log("note: could not put the copy on the system clipboard (%s)" % e)
+
+
+def load_prefs():
+    try:
+        with open(PREFS_FILE, "r", encoding="utf-8") as f:
+            prefs = json.load(f)
+        return prefs if isinstance(prefs, dict) else {}
+    except (IOError, OSError, ValueError):
+        return {}
+
+
+def save_prefs(prefs):
+    if not os.path.isdir(BRIDGE_DIR):
+        os.makedirs(BRIDGE_DIR)
+    tmp = PREFS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(prefs, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, PREFS_FILE)
+
+
+def get_default_path():
+    """Folder where the bridge may write files of its own. Empty until the
+    user sets one."""
+    path = (load_prefs().get("default_path") or "").strip()
+    return path
 
 
 def read_clip():
@@ -543,6 +574,20 @@ def _src_port_dotted(port):
     return _last_segment(port).lower()
 
 
+_NO_DEFAULT_PATH_WARNED = [False]
+
+
+def _warn_no_default_path_once(warnings):
+    if _NO_DEFAULT_PATH_WARNED[0]:
+        return
+    _NO_DEFAULT_PATH_WARNED[0] = True
+    warnings.append(
+        "Asset Browser textures are being referenced inside Cinema 4D's "
+        "asset cache, which is not meant to be relied on. Set a default "
+        "path in RS Bridge > Preferences and they will be written out as "
+        "ordinary files instead.")
+
+
 _CONN_API_WARNED = [False]
 
 
@@ -609,6 +654,89 @@ def resolve_asset_url(url_text):
             break
     _asset_cache_index[key] = found
     return found
+
+
+def asset_metadata(url_text):
+    """(real filename, category path) for an Asset Browser texture.
+
+    The mangled id says nothing about what the texture is, but the asset
+    database knows its real name and which category it belongs to
+    ('Fencing'), and categories nest -- all of it free, and exactly what
+    is needed to write the file out somewhere a human can navigate."""
+    name, categories = None, []
+    try:
+        repo = maxon.AssetInterface.GetUserPrefsRepository()
+        desc = maxon.AssetInterface.ResolveAsset(maxon.Url(url_text), repo)
+        if desc is None or _is_null(desc):
+            return None, []
+        name = desc.GetMetaString(maxon.OBJECT.BASE.NAME,
+                                  maxon.LanguageRef(), "") or None
+        cat_type = maxon.AssetTypes.Category().GetId()
+        cat_id = desc.GetMetaData().Get(maxon.ASSETMETADATA.Category)
+        for _ in range(6):            # categories nest; walk up to the root
+            if not cat_id:
+                break
+            cat = repo.FindLatestAsset(cat_type, maxon.Id(str(cat_id)),
+                                       maxon.Id(),
+                                       maxon.ASSET_FIND_MODE.LATEST)
+            if cat is None or _is_null(cat):
+                break
+            cat_name = cat.GetMetaString(maxon.OBJECT.BASE.NAME,
+                                         maxon.LanguageRef(), "")
+            if not cat_name:
+                break
+            categories.insert(0, cat_name)
+            cat_id = cat.GetMetaData().Get(maxon.ASSETMETADATA.Category)
+    except Exception:
+        pass
+    return name, categories
+
+
+def _safe_name(text, fallback="untitled"):
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", (text or "").strip())
+    cleaned = cleaned.rstrip(" .")
+    return cleaned or fallback
+
+
+def export_asset_texture(url_text, material_name, warnings):
+    """Write an Asset Browser texture out as a real file under the
+    preferences' default path, and return that path.
+
+    Without it the material can only point into Cinema 4D's asset cache:
+    it renders today, but the path is opaque and the cache is not meant to
+    be depended on. Returns None when there is no default path set or the
+    copy fails, so the caller can fall back."""
+    cached = resolve_asset_url(url_text)
+    if not cached:
+        return None
+    root = get_default_path()
+    if not root:
+        return None
+
+    name, categories = asset_metadata(url_text)
+    if not name:
+        name = os.path.basename(cached)
+    parts = [root, ASSET_EXPORT_FOLDER]
+    parts += [_safe_name(c) for c in categories]
+    parts.append(_safe_name(material_name, "material"))
+    folder = os.path.join(*parts)
+
+    ext = os.path.splitext(name)[1] or os.path.splitext(cached)[1]
+    target = os.path.join(folder, _safe_name(
+        os.path.splitext(name)[0], "texture") + ext)
+    try:
+        if not os.path.isdir(folder):
+            os.makedirs(folder)
+        # Same size means it is already there: re-copying a 4K texture on
+        # every copy would be pure waste.
+        if not (os.path.isfile(target)
+                and os.path.getsize(target) == os.path.getsize(cached)):
+            shutil.copy2(cached, target)
+    except OSError as e:
+        warnings.append("could not write '%s' to %s (%s)"
+                        % (name, folder, e))
+        return None
+    return target
 
 
 def _url_from_path(path):
@@ -775,10 +903,10 @@ def to_jsonable(v):
     if isinstance(v, maxon.Url):
         raw = str(v)
         if raw.lower().startswith("asset:"):
-            # GetSystemPath() on an asset URL yields the mangled id, which
-            # is useless anywhere else -- resolve it to the cached file, or
-            # keep the whole URL so the caller can say what is wrong.
-            return resolve_asset_url(raw) or raw
+            # Keep the whole asset URL: GetSystemPath() would give the
+            # mangled id, and only the export layer knows whether to write
+            # the texture out or fall back to the cached copy.
+            return raw
         try:
             s = v.GetSystemPath()
         except Exception:
@@ -971,8 +1099,20 @@ def build_material(mat, warnings):
                     continue
                 params[dotted.lower()] = val
         nname = node_display_name(node)
-        for pname, pval in params.items():
-            if isinstance(pval, str) and pval.lower().startswith("asset:"):
+        for pname, pval in list(params.items()):
+            if not (isinstance(pval, str)
+                    and pval.lower().startswith("asset:")):
+                continue
+            written = export_asset_texture(pval, mat.GetName(), warnings)
+            if written:
+                params[pname] = written
+                continue
+            if resolve_asset_url(pval):
+                # Cached but nowhere to put it: keep the cache path so the
+                # texture still shows, and say how to make it permanent.
+                params[pname] = resolve_asset_url(pval)
+                _warn_no_default_path_once(warnings)
+            else:
                 warnings.append(
                     "%s: '%s' points into the Cinema 4D Asset Browser and "
                     "no cached copy was found, so the texture will be "
@@ -1337,6 +1477,26 @@ def run_copy():
         % (len(copied), names, nodes, wires, len(data["warnings"]),
            "\n\nSee the Console for warning details."
            if data["warnings"] else ""))
+
+
+def run_preferences():
+    """Ask for the folder the bridge may write into."""
+    current = get_default_path()
+    chosen = c4d.storage.LoadDialog(
+        title="Default path -- where the bridge may write textures it has "
+              "to extract",
+        flags=c4d.FILESELECT_DIRECTORY,
+        def_path=current or "")
+    if chosen is None:
+        return
+    prefs = load_prefs()
+    prefs["default_path"] = chosen
+    save_prefs(prefs)
+    _log("default path set to %s" % chosen)
+    gui.MessageDialog(
+        "Default path set to:\n%s\n\nTextures that only exist inside the "
+        "Asset Browser will be written to\n%s\\%s\\<category>\\<material>"
+        % (chosen, chosen, ASSET_EXPORT_FOLDER))
 
 
 def run_paste():

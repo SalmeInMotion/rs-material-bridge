@@ -176,6 +176,32 @@ Classes that exist under different names in each app (e.g. `osl` in C4D is
 `rsosl` in Houdini) are bridged automatically via the alias table
 (`CLASS_ALIASES` in both bridge modules) and counted as portable.
 
+### Preferences — default path
+
+**RS Bridge > Preferences...** in Cinema 4D sets a folder the bridge is
+allowed to write into, stored in
+`%USERPROFILE%\.rs_material_bridge\preferences.json`.
+
+It is used for textures that are not files. Materials from the **Asset
+Browser** keep their textures inside an asset database, under a mangled id
+that means nothing outside Cinema 4D, so such a material transfers
+complete but renders untextured. With a default path set, those textures
+are written out as ordinary files and the material points at them:
+
+```
+<default path>/C4D - Asset Browser/<categories>/<material>/<texture>.png
+```
+
+The categories and the real file names come from the asset database, so
+the result is navigable rather than a pile of hashes — e.g.
+`C4D - Asset Browser/Textures/Surfaces/Redshift/Fencing/Fence Chicken
+Wire 01 .../mxn_fence_chicken_wire-01_4k_opacity.png`. Files already
+written are not copied again.
+
+Without a default path the material still works: the textures point into
+Cinema 4D's asset cache, with a warning saying so — that cache is not
+meant to be depended on.
+
 ### Ramps
 
 Ramps travel with their knots (position, colour/value) intact. Because the

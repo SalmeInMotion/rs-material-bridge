@@ -118,6 +118,14 @@ apps on the same machine. Cross-machine: copy that file over (or point
 both apps' `RS_MATERIAL_BRIDGE_DIR` environment variable to a shared
 folder).
 
+## Materials from the Asset Browser
+
+Their textures are not files on disk — they live inside Cinema 4D's asset
+database. Set a folder in **RS Bridge > Preferences...** and the bridge
+writes them out as ordinary files, organised by the asset's own categories
+and material name, so the material arrives textured. Without it the
+material still transfers, but points into C4D's asset cache and says so.
+
 ## "The material arrived but the textures don't show in Houdini"
 
 Almost always the geometry, not the material. **Houdini geometry has no UV

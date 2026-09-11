@@ -20,6 +20,7 @@ from c4d import plugins, gui
 
 PLUGIN_ID_COPY = 1000001
 PLUGIN_ID_PASTE = 1000002
+PLUGIN_ID_PREFS = 1000005
 
 CORE_NAME = "rs_bridge_c4d_core.py"
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -97,6 +98,17 @@ class PasteMaterialCommand(plugins.CommandData):
         return c4d.CMD_ENABLED
 
 
+class PreferencesCommand(plugins.CommandData):
+    def Execute(self, doc):
+        if not _require_bridge():
+            return True
+        bridge.run_preferences()
+        return True
+
+    def GetState(self, doc):
+        return c4d.CMD_ENABLED
+
+
 def _build_menu():
     """Insert an 'RS Bridge' menu into the main menu bar."""
     main_menu = gui.GetMenuResource("M_EDITOR")
@@ -114,6 +126,9 @@ def _build_menu():
                  "PLUGIN_CMD_%d" % PLUGIN_ID_COPY)
     menu.InsData(c4d.MENURESOURCE_COMMAND,
                  "PLUGIN_CMD_%d" % PLUGIN_ID_PASTE)
+    menu.InsData(c4d.MENURESOURCE_SEPERATOR, True)
+    menu.InsData(c4d.MENURESOURCE_COMMAND,
+                 "PLUGIN_CMD_%d" % PLUGIN_ID_PREFS)
 
     plugins_menu = gui.SearchPluginMenuResource()
     if plugins_menu is not None:
@@ -153,3 +168,10 @@ if __name__ == "__main__":
         icon=_icon("paste.tif"),
         help="Rebuild the material held in the bridge clipboard",
         dat=PasteMaterialCommand())
+    plugins.RegisterCommandPlugin(
+        id=PLUGIN_ID_PREFS,
+        str="RS Bridge Preferences...",
+        info=0,
+        icon=None,
+        help="Set the folder the bridge may write extracted textures to",
+        dat=PreferencesCommand())

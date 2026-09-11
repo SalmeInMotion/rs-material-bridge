@@ -68,12 +68,30 @@ def _load_prefs():
 
 
 def scene_meters_per_unit():
+    """Metres per scene unit, as Houdini itself reports it.
+
+    There is no hou API for this, but hscript answers 'Unit Length: 1
+    meters'. Asking beats assuming: a scene set to centimetres would
+    otherwise have every length converted a hundredfold the wrong way."""
+    override = _load_prefs().get("houdini_meters_per_unit")
+    if override:
+        try:
+            value = float(override)
+            if value > 0:
+                return value
+        except (TypeError, ValueError):
+            pass
     try:
-        value = float(_load_prefs().get("houdini_meters_per_unit")
-                      or DEFAULT_METERS_PER_UNIT)
-        return value if value > 0 else DEFAULT_METERS_PER_UNIT
-    except (TypeError, ValueError):
-        return DEFAULT_METERS_PER_UNIT
+        out, _err = hou.hscript("unitlength")
+        m = re.search(r"([0-9]*\.?[0-9]+(?:[eE][-+]?\d+)?)\s*met",
+                      out or "", re.IGNORECASE)
+        if m:
+            value = float(m.group(1))
+            if value > 0:
+                return value
+    except (hou.Error, ValueError):
+        pass
+    return DEFAULT_METERS_PER_UNIT
 
 
 def scale_lengths(node_json, factor):

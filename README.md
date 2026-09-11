@@ -220,7 +220,14 @@ Two settings in `preferences.json` govern it:
 | Key | Meaning |
 |---|---|
 | `convert_units` | set to `false` to transfer lengths verbatim |
-| `houdini_meters_per_unit` | Houdini exposes no API for the scene's unit length, so `1.0` is assumed; override it here if your scenes use something else |
+| `houdini_meters_per_unit` | override Houdini's reported unit length (read from `unitlength`, normally 1 metre) |
+
+**If lengths still land wrong, check Houdini's Unit Length first.** The
+conversion honours what each application *declares* its units to be, not
+how big the geometry happens to be. Modelling at centimetre numbers in a
+scene that says "1 unit = 1 metre" will convert the wrong way — set
+Houdini's unit length to match how you actually work, or turn
+`convert_units` off.
 
 ### Ramps
 

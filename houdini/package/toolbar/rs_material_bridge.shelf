@@ -12,7 +12,9 @@
   <tool name="rs_bridge_copy_material" label="RS Copy" icon="SHELF_copy">
     <helpText><![CDATA[Copy the selected Redshift material to the bridge clipboard, so it can be pasted in Cinema 4D.]]></helpText>
     <script scriptType="python"><![CDATA[
+import importlib
 import rs_bridge_hou
+importlib.reload(rs_bridge_hou)
 rs_bridge_hou.copy_selected_material()
 ]]></script>
   </tool>
@@ -20,7 +22,9 @@ rs_bridge_hou.copy_selected_material()
   <tool name="rs_bridge_paste_material" label="RS Paste" icon="SHELF_paste">
     <helpText><![CDATA[Rebuild the material held in the bridge clipboard into /mat.]]></helpText>
     <script scriptType="python"><![CDATA[
+import importlib
 import rs_bridge_hou
+importlib.reload(rs_bridge_hou)
 rs_bridge_hou.paste_material()
 ]]></script>
   </tool>

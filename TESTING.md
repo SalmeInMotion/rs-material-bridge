@@ -118,6 +118,15 @@ apps on the same machine. Cross-machine: copy that file over (or point
 both apps' `RS_MATERIAL_BRIDGE_DIR` environment variable to a shared
 folder).
 
+## Scene units
+
+Cinema 4D counts in centimetres and Houdini in metres, so lengths are
+converted on paste — a displacement of 0.25 cm arrives as 0.0025 rather
+than a hundred times too strong. Only parameters that really are lengths
+are touched (displacement scale, subsurface radius) and the report says
+which. **If you spot another setting that lands the wrong size, that is
+worth reporting** — it probably belongs on that list.
+
 ## Materials from the Asset Browser
 
 Their textures are not files on disk — they live inside Cinema 4D's asset

@@ -48,6 +48,30 @@ CANON_TO_C4D_INTERP = {
     "smooth": "smoothknot",
 }
 
+# Lengths are stored in scene units, and the two applications rarely agree
+# on what a unit is: Cinema 4D defaults to centimetres, Houdini to metres.
+# A displacement of 0.25 then arrives a hundred times too strong. Only
+# parameters that really are lengths may be rescaled -- guessing wrongly
+# would be worse than leaving them alone.
+LENGTH_PARAMS = {
+    "displacement": ("scale",),
+    "standardmaterial": ("ms_radius",),
+    "openpbrmaterial": ("subsurface_radius",),
+}
+
+C4D_UNIT_METERS = {
+    1: 1000.0,       # km
+    2: 1.0,          # m
+    3: 0.01,         # cm
+    4: 0.001,        # mm
+    5: 1e-6,         # micrometre
+    6: 1e-9,         # nanometre
+    7: 1609.344,     # mile
+    8: 0.9144,       # yard
+    9: 0.3048,       # foot
+    10: 0.0254,      # inch
+}
+
 BRIDGE_DIR = os.environ.get(
     "RS_MATERIAL_BRIDGE_DIR",
     os.path.join(os.path.expanduser("~"), ".rs_material_bridge"),
@@ -120,6 +144,37 @@ def save_prefs(prefs):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(prefs, f, indent=2, ensure_ascii=False)
     os.replace(tmp, PREFS_FILE)
+
+
+def scene_meters_per_unit(doc):
+    """How many metres one scene unit is worth, so lengths can cross into
+    an application that counts differently."""
+    try:
+        scale, unit = doc[c4d.DOCUMENT_DOCUNIT].GetUnitScale()
+        return float(scale) * C4D_UNIT_METERS.get(int(unit), 0.01)
+    except Exception:
+        return 0.01          # Cinema 4D's default is centimetres
+
+
+def scale_lengths(node_json, factor, warnings):
+    """Rescale the length parameters of one node in place."""
+    if abs(factor - 1.0) < 1e-9:
+        return []
+    names = LENGTH_PARAMS.get((node_json.get("class") or "").lower(), ())
+    changed = []
+    for name in names:
+        value = node_json.get("params", {}).get(name)
+        if isinstance(value, bool) or value is None:
+            continue
+        if isinstance(value, (int, float)):
+            node_json["params"][name] = value * factor
+        elif isinstance(value, list) and all(
+                isinstance(x, (int, float)) for x in value):
+            node_json["params"][name] = [x * factor for x in value]
+        else:
+            continue
+        changed.append("%s.%s" % (node_json.get("name"), name))
+    return changed
 
 
 def get_default_path():
@@ -1217,6 +1272,7 @@ def export_materials(mats):
             "Nothing could be copied.\n\n"
             + ("\n".join(warnings) if warnings else
                "Select a Redshift node material."))
+    doc = c4d.documents.GetActiveDocument()
     return {
         "format": FORMAT_NAME,
         "version": FORMAT_VERSION,
@@ -1224,6 +1280,7 @@ def export_materials(mats):
         "source_app": "c4d",
         "source_version": str(c4d.GetC4DVersion()),
         "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "meters_per_unit": scene_meters_per_unit(doc),
         "materials": materials,
         "warnings": warnings,
     }
@@ -1415,13 +1472,23 @@ def import_materials(data, doc):
     if not materials_json:
         raise RuntimeError("The clipboard holds no material.")
 
+    factor = 1.0
+    if load_prefs().get("convert_units", True):
+        source = float(data.get("meters_per_unit") or 0.0)
+        mine = scene_meters_per_unit(doc)
+        if source > 0 and mine > 0:
+            factor = source / mine
+
     built, stats = [], {"nodes": 0, "nodes_total": 0,
                         "connections": 0, "connections_total": 0,
                         "materials": 0,
                         "materials_total": len(materials_json)}
+    rescaled = []
     doc.StartUndo()
     try:
         for mat_json in materials_json:
+            for node_json in mat_json.get("nodes", []):
+                rescaled += scale_lengths(node_json, factor, warnings)
             stats["nodes_total"] += len(mat_json.get("nodes", []))
             stats["connections_total"] += len(mat_json.get("connections",
                                                            []))
@@ -1442,6 +1509,12 @@ def import_materials(data, doc):
         doc.EndUndo()
         c4d.EventAdd()
 
+    if rescaled:
+        warnings.append(
+            "scene units differ (x%g): rescaled %s. Other length-like "
+            "settings may need the same factor by hand."
+            % (factor, ", ".join(rescaled[:6])
+               + (", ..." if len(rescaled) > 6 else "")))
     if not built:
         raise RuntimeError("No material could be rebuilt.\n\n"
                            + "\n".join(warnings[-5:]))

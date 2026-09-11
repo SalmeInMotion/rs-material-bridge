@@ -42,6 +42,60 @@ TOOL_VERSION = "0.9.0-beta.2"
 # have no Cinema 4D counterpart and are sent as the nearest smooth curve.
 RAMP_KIND = "ramp"
 
+# Lengths live in scene units, and the two applications disagree on what a
+# unit is: Houdini works in metres, Cinema 4D defaults to centimetres, so a
+# displacement of 0.25 lands a hundred times too strong. Only parameters
+# that really are lengths may be rescaled -- guessing wrongly would be
+# worse than leaving them alone. Houdini has no API for the scene's unit
+# length, so its convention is assumed and can be overridden in the
+# preferences file shared with the other side.
+LENGTH_PARAMS = {
+    "displacement": ("scale",),
+    "standardmaterial": ("ms_radius",),
+    "openpbrmaterial": ("subsurface_radius",),
+}
+DEFAULT_METERS_PER_UNIT = 1.0
+
+
+def _load_prefs():
+    try:
+        with open(os.path.join(BRIDGE_DIR, "preferences.json"), "r",
+                  encoding="utf-8") as f:
+            prefs = json.load(f)
+        return prefs if isinstance(prefs, dict) else {}
+    except (IOError, OSError, ValueError):
+        return {}
+
+
+def scene_meters_per_unit():
+    try:
+        value = float(_load_prefs().get("houdini_meters_per_unit")
+                      or DEFAULT_METERS_PER_UNIT)
+        return value if value > 0 else DEFAULT_METERS_PER_UNIT
+    except (TypeError, ValueError):
+        return DEFAULT_METERS_PER_UNIT
+
+
+def scale_lengths(node_json, factor):
+    """Rescale one node's length parameters in place; returns what changed."""
+    if abs(factor - 1.0) < 1e-9:
+        return []
+    names = LENGTH_PARAMS.get((node_json.get("class") or "").lower(), ())
+    changed = []
+    for name in names:
+        value = node_json.get("params", {}).get(name)
+        if isinstance(value, bool) or value is None:
+            continue
+        if isinstance(value, (int, float)):
+            node_json["params"][name] = value * factor
+        elif isinstance(value, list) and all(
+                isinstance(x, (int, float)) for x in value):
+            node_json["params"][name] = [x * factor for x in value]
+        else:
+            continue
+        changed.append("%s.%s" % (node_json.get("name"), name))
+    return changed
+
 
 def _hou_basis_maps():
     b = hou.rampBasis
@@ -518,6 +572,7 @@ def export_materials(builders):
         "source_app": "houdini",
         "source_version": hou.applicationVersionString(),
         "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "meters_per_unit": scene_meters_per_unit(),
         "materials": materials,
         "warnings": warnings,
     }
@@ -816,11 +871,21 @@ def import_materials(data, dest="/mat"):
     if matnet is None:
         raise RuntimeError("Destination network not found: %s" % dest)
 
+    factor = 1.0
+    if _load_prefs().get("convert_units", True):
+        source = float(data.get("meters_per_unit") or 0.0)
+        mine = scene_meters_per_unit()
+        if source > 0 and mine > 0:
+            factor = source / mine
+
     origin = _drop_position(matnet)
     builders, stats = [], {"materials": 0, "materials_total": len(materials),
                            "nodes": 0, "nodes_total": 0,
                            "connections": 0, "connections_total": 0}
+    rescaled = []
     for i, mat in enumerate(materials):
+        for node_json in mat.get("nodes", []):
+            rescaled += scale_lengths(node_json, factor)
         stats["nodes_total"] += len(mat.get("nodes", []))
         stats["connections_total"] += len(mat.get("connections", []))
         try:
@@ -837,6 +902,12 @@ def import_materials(data, dest="/mat"):
         stats["nodes"] += n_nodes
         stats["connections"] += n_wires
 
+    if rescaled:
+        warnings.append(
+            "scene units differ (x%g): rescaled %s. Other length-like "
+            "settings may need the same factor by hand."
+            % (factor, ", ".join(rescaled[:6])
+               + (", ..." if len(rescaled) > 6 else "")))
     if not builders:
         raise RuntimeError("No material could be rebuilt.\n"
                            + "\n".join(warnings[-5:]))

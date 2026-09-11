@@ -202,6 +202,26 @@ Without a default path the material still works: the textures point into
 Cinema 4D's asset cache, with a warning saying so — that cache is not
 meant to be depended on.
 
+### Scene units
+
+Lengths are stored in scene units and the two applications disagree on
+what a unit is — Cinema 4D defaults to centimetres, Houdini works in
+metres. A displacement of `0.25` therefore arrives a hundred times too
+strong unless it is converted.
+
+Each copy records how many metres one of its units is worth, and the
+paste rescales the parameters that genuinely are lengths (displacement
+scale, subsurface radius), reporting the factor and exactly what it
+touched. Parameters that merely look like lengths are left alone:
+rescaling the wrong one is worse than rescaling none.
+
+Two settings in `preferences.json` govern it:
+
+| Key | Meaning |
+|---|---|
+| `convert_units` | set to `false` to transfer lengths verbatim |
+| `houdini_meters_per_unit` | Houdini exposes no API for the scene's unit length, so `1.0` is assumed; override it here if your scenes use something else |
+
 ### Ramps
 
 Ramps travel with their knots (position, colour/value) intact. Because the

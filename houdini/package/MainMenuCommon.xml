@@ -15,7 +15,9 @@
             <scriptItem id="rs_bridge_copy_material">
                 <label>Copy RS Material</label>
                 <scriptCode><![CDATA[
+import importlib
 import rs_bridge_hou
+importlib.reload(rs_bridge_hou)   # an update must not need a restart
 rs_bridge_hou.copy_selected_material()
                 ]]></scriptCode>
             </scriptItem>
@@ -23,7 +25,9 @@ rs_bridge_hou.copy_selected_material()
             <scriptItem id="rs_bridge_paste_material">
                 <label>Paste RS Material</label>
                 <scriptCode><![CDATA[
+import importlib
 import rs_bridge_hou
+importlib.reload(rs_bridge_hou)
 rs_bridge_hou.paste_material()
                 ]]></scriptCode>
             </scriptItem>

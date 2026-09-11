@@ -118,6 +118,23 @@ apps on the same machine. Cross-machine: copy that file over (or point
 both apps' `RS_MATERIAL_BRIDGE_DIR` environment variable to a shared
 folder).
 
+## "The material arrived but the textures don't show in Houdini"
+
+Almost always the geometry, not the material. **Houdini geometry has no UV
+coordinates unless you add them**, while Cinema 4D primitives come with
+them built in — so the same material looks right in C4D and flat in
+Houdini. Add a **UV Project**, **UV Texture** or **UV Unwrap** SOP before
+rendering, or feed the texture through a Triplanar node, which needs no
+UVs at all.
+
+Verified here with a sphere rendered twice, identical material and
+texture: without a `uv` attribute it renders flat, with one the texture
+maps correctly.
+
+While you are there: Redshift in Houdini often logs *"OpenColorIO failed
+instantiating monitor color spaces"*. It is harmless — it falls back to
+ACEScg / sRGB and renders normally.
+
 ## How to report issues
 
 Every Copy/Paste prints a `[RS Bridge]` report to the app's console

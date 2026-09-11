@@ -222,6 +222,40 @@ def _staleness_warning():
     return None
 
 
+def _show_report(title, lines, warnings):
+    """Result and warnings in one window, with a button that copies the
+    lot -- reporting a problem should not mean digging in the console."""
+    report = "\n".join(lines)
+    if warnings:
+        report += "\n\nWarnings (%d):\n" % len(warnings)
+        report += "\n".join("  - %s" % w for w in warnings)
+    else:
+        report += "\n\nNo warnings."
+    print("[RS Bridge] " + report.replace("\n", "\n[RS Bridge] "))
+    try:
+        if not hou.isUIAvailable():
+            return
+        choice = hou.ui.displayMessage(
+            report, buttons=("Close", "Copy report"),
+            title=title, close_choice=0)
+        if choice == 1:
+            hou.ui.copyTextToClipboard(report)
+    except (hou.Error, AttributeError):
+        pass
+
+
+def _version_warning(data):
+    """Both sides must be the same build. A tester running one version in
+    one application and another in the other spends the afternoon chasing
+    fixes that are simply not installed -- as happened here."""
+    other = data.get("tool_version")
+    if other and other != TOOL_VERSION:
+        return ("the material was copied with bridge %s but this side is "
+                "%s -- update the older one, or you will see bugs that are "
+                "already fixed" % (other, TOOL_VERSION))
+    return None
+
+
 def _ui_status(msg):
     try:
         if hou.isUIAvailable():
@@ -664,13 +698,17 @@ def copy_selected_material():
     names = ", ".join(m["name"] for m in copied[:4])
     if len(copied) > 4:
         names += ", ... (%d total)" % len(copied)
-    msg = ("[RS Bridge] Copied %d material(s) [%s]: %d nodes, %d "
-           "connections -> %s" % (len(copied), names, nodes, wires,
-                                  CLIP_FILE))
-    print(msg)
-    for w in data["warnings"]:
-        print("[RS Bridge]   warning: %s" % w)
-    _ui_status(msg)
+    _ui_status("[RS Bridge] Copied %d material(s) to the bridge clipboard"
+               % len(copied))
+    _show_report("RS Bridge -- Copy",
+                 ["Copied to the bridge clipboard.",
+                  "",
+                  "Materials:   %d (%s)" % (len(copied), names),
+                  "Nodes:       %d" % nodes,
+                  "Connections: %d" % wires,
+                  "Bridge:      %s" % TOOL_VERSION,
+                  "Clipboard:   %s" % CLIP_FILE],
+                 data["warnings"])
     return data
 
 
@@ -906,9 +944,9 @@ def build_hou_material(mat, matnet, type_map, warnings):
 def import_materials(data, dest="/mat"):
     """Rebuild every material in the clipboard under `dest`."""
     warnings = list(data.get("warnings", []))
-    stale = _staleness_warning()
-    if stale:
-        warnings.insert(0, stale)
+    for note in (_staleness_warning(), _version_warning(data)):
+        if note:
+            warnings.insert(0, note)
     materials = clipboard_materials(data)
     if not materials:
         raise RuntimeError("The clipboard holds no material.")
@@ -982,16 +1020,19 @@ def paste_material(dest="/mat"):
     names = ", ".join(b.name() for b in builders[:4])
     if len(builders) > 4:
         names += ", ... (%d total)" % len(builders)
-    msg = ("[RS Bridge] Pasted %d of %d material(s) from %s: %s  "
-           "(nodes %d/%d, connections %d/%d)"
-           % (stats["materials"], stats["materials_total"],
-              data.get("source_app"), names,
-              stats["nodes"], stats["nodes_total"],
-              stats["connections"], stats["connections_total"]))
-    print(msg)
-    for w in warnings:
-        print("[RS Bridge]   warning: %s" % w)
-    _ui_status(msg)
-    if warnings:
-        print("[RS Bridge] %d warning(s) -- see above." % len(warnings))
+    _ui_status("[RS Bridge] Pasted %d of %d material(s)"
+               % (stats["materials"], stats["materials_total"]))
+    _show_report("RS Bridge -- Paste",
+                 ["Pasted from %s (bridge %s)."
+                  % (data.get("source_app", "?"),
+                     data.get("tool_version", "?")),
+                  "",
+                  "Materials:   %d of %d (%s)"
+                  % (stats["materials"], stats["materials_total"], names),
+                  "Nodes:       %d of %d"
+                  % (stats["nodes"], stats["nodes_total"]),
+                  "Connections: %d of %d"
+                  % (stats["connections"], stats["connections_total"]),
+                  "This side:   %s" % TOOL_VERSION],
+                 warnings)
     return builders

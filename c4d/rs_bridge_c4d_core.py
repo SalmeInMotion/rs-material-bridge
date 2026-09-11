@@ -1563,12 +1563,72 @@ def run_copy():
          % (len(copied), names, nodes, wires, CLIP_FILE))
     for w in data["warnings"]:
         _log("  warning: %s" % w)
-    gui.MessageDialog(
-        "Copied to the bridge clipboard.\n\n"
-        "Materials: %d (%s)\nNodes: %d\nConnections: %d\nWarnings: %d%s"
-        % (len(copied), names, nodes, wires, len(data["warnings"]),
-           "\n\nSee the Console for warning details."
-           if data["warnings"] else ""))
+    show_report("RS Bridge -- Copy",
+                ["Copied to the bridge clipboard.",
+                 "",
+                 "Materials:   %d (%s)" % (len(copied), names),
+                 "Nodes:       %d" % nodes,
+                 "Connections: %d" % wires,
+                 "Bridge:      %s" % TOOL_VERSION,
+                 "Clipboard:   %s" % CLIP_FILE],
+                data["warnings"])
+
+
+class ReportDialog(gui.GeDialog):
+    """Shows the result and every warning in one place, with a button that
+    puts the whole thing on the clipboard. Sending a report should not
+    mean hunting through the Console."""
+
+    ID_TEXT = 2001
+    ID_COPY = 2002
+    ID_CLOSE = 2003
+
+    def __init__(self, title, report):
+        super(ReportDialog, self).__init__()
+        self._title = title
+        self._report = report
+
+    def CreateLayout(self):
+        self.SetTitle(self._title)
+        self.GroupBegin(0, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT, cols=1)
+        self.GroupBorderSpace(8, 8, 8, 4)
+        self.AddMultiLineEditText(
+            self.ID_TEXT, c4d.BFH_SCALEFIT | c4d.BFV_SCALEFIT,
+            initw=620, inith=320,
+            style=c4d.DR_MULTILINE_READONLY | c4d.DR_MULTILINE_MONOSPACED)
+        self.GroupEnd()
+        self.GroupBegin(0, c4d.BFH_SCALEFIT, cols=2)
+        self.GroupBorderSpace(8, 0, 8, 8)
+        self.AddButton(self.ID_COPY, c4d.BFH_LEFT, name="Copy report")
+        self.AddButton(self.ID_CLOSE, c4d.BFH_RIGHT, name="Close")
+        self.GroupEnd()
+        return True
+
+    def InitValues(self):
+        self.SetString(self.ID_TEXT, self._report)
+        return True
+
+    def Command(self, cid, msg):
+        if cid == self.ID_COPY:
+            try:
+                c4d.CopyStringToClipboard(self._report)
+                self.SetString(self.ID_COPY, "Copied")
+            except Exception as e:
+                _log("could not copy the report: %s" % e)
+        elif cid == self.ID_CLOSE:
+            self.Close()
+        return True
+
+
+def show_report(title, lines, warnings):
+    report = "\n".join(lines)
+    if warnings:
+        report += "\n\nWarnings (%d):\n" % len(warnings)
+        report += "\n".join("  - %s" % w for w in warnings)
+    else:
+        report += "\n\nNo warnings."
+    dlg = ReportDialog(title, report)
+    dlg.Open(c4d.DLG_TYPE_MODAL, defaultw=660, defaulth=420)
 
 
 def run_preferences():
@@ -1608,12 +1668,16 @@ def run_paste():
             data.get("tool_version", "?")))
     for w in warnings:
         _log("  warning: %s" % w)
-    gui.MessageDialog(
-        "Pasted from %s.\n\n"
-        "Materials: %d of %d (%s)\nNodes: %d of %d\nConnections: %d of %d\n"
-        "Warnings: %d%s"
-        % (data.get("source_app", "?"),
-           stats["materials"], stats["materials_total"], names,
-           stats["nodes"], stats["nodes_total"],
-           stats["connections"], stats["connections_total"], len(warnings),
-           "\n\nSee the Console for warning details." if warnings else ""))
+    show_report("RS Bridge -- Paste",
+                ["Pasted from %s (bridge %s)."
+                 % (data.get("source_app", "?"),
+                    data.get("tool_version", "?")),
+                 "",
+                 "Materials:   %d of %d (%s)"
+                 % (stats["materials"], stats["materials_total"], names),
+                 "Nodes:       %d of %d"
+                 % (stats["nodes"], stats["nodes_total"]),
+                 "Connections: %d of %d"
+                 % (stats["connections"], stats["connections_total"]),
+                 "This side:   %s" % TOOL_VERSION],
+                warnings)

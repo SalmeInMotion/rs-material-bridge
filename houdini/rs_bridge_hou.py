@@ -748,7 +748,20 @@ def _set_parm(pt, value, node_label, warnings):
     # Menu parms accept any string, so a name from the other application
     # would be stored verbatim and silently ignored by the renderer. The
     # menu has to be consulted before setting, not after failing.
-    is_string = (pt.parmTemplate().type() == hou.parmTemplateType.String)
+    template = pt.parmTemplate()
+    is_string = (template.type() == hou.parmTemplateType.String)
+    # A file field is not a menu, even though Houdini offers one on it
+    # (recent files) when the interface is up. Validating a texture path
+    # against that list rejects every path -- and only in the GUI, which
+    # is precisely where headless testing cannot see it.
+    if is_string:
+        try:
+            if template.stringType() in (hou.stringParmType.FileReference,
+                                         hou.stringParmType.NodeReference,
+                                         hou.stringParmType.NodeReferenceList):
+                is_string = False
+        except AttributeError:
+            pass
     if is_string:
         try:
             menu = pt[0].menuItems()

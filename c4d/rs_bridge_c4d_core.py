@@ -178,10 +178,32 @@ def scale_lengths(node_json, factor, warnings):
 
 
 def get_default_path():
-    """Folder where the bridge may write files of its own. Empty until the
-    user sets one."""
-    path = (load_prefs().get("default_path") or "").strip()
-    return path
+    """Folder the user chose for files the bridge has to write."""
+    return (load_prefs().get("default_path") or "").strip()
+
+
+def fallback_texture_path():
+    """Where to put extracted textures when no folder was chosen.
+
+    Leaving them unwritten means the material arrives untextured, which is
+    worse than putting them somewhere imperfect -- so they go next to the
+    installation, and the report says loudly that a real folder should be
+    chosen instead. Falls back to the bridge folder when the installation
+    is not writable."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in (os.path.join(here, "textures"),
+                      os.path.join(BRIDGE_DIR, "textures")):
+        try:
+            if not os.path.isdir(candidate):
+                os.makedirs(candidate)
+            probe = os.path.join(candidate, ".writable")
+            with open(probe, "w", encoding="utf-8") as f:
+                f.write("")
+            os.remove(probe)
+            return candidate
+        except OSError:
+            continue
+    return None
 
 
 def read_clip():
@@ -630,11 +652,13 @@ def _warn_no_default_path_once(warnings):
     if _NO_DEFAULT_PATH_WARNED[0]:
         return
     _NO_DEFAULT_PATH_WARNED[0] = True
-    warnings.append(
-        "Asset Browser textures are being referenced inside Cinema 4D's "
-        "asset cache, which is not meant to be relied on. Set a default "
-        "path in RS Bridge > Preferences and they will be written out as "
-        "ordinary files instead.")
+    warnings.insert(0,
+        "NO DEFAULT PATH SET -- Asset Browser textures were written next "
+        "to the installation (%s). THAT FOLDER IS NOT A GOOD HOME FOR "
+        "THEM: it is wiped by a reinstall and is not where the other "
+        "application will look on another machine. Choose a real exchange "
+        "folder in RS Bridge > Preferences."
+        % (fallback_texture_path() or "?"))
 
 
 _CONN_API_WARNED = [False]
@@ -760,7 +784,10 @@ def export_asset_texture(url_text, material_name, warnings):
         return None
     root = get_default_path()
     if not root:
-        return None
+        root = fallback_texture_path()
+        if not root:
+            return None
+        _warn_no_default_path_once(warnings)
 
     name, categories = asset_metadata(url_text)
     if not name:
@@ -1179,11 +1206,15 @@ def build_material(mat, warnings):
             if written:
                 params[pname] = written
                 continue
-            if resolve_asset_url(pval):
-                # Cached but nowhere to put it: keep the cache path so the
-                # texture still shows, and say how to make it permanent.
-                params[pname] = resolve_asset_url(pval)
-                _warn_no_default_path_once(warnings)
+            cached = resolve_asset_url(pval)
+            if cached:
+                # Nowhere writable to put it: the cache path at least
+                # renders, which beats an untextured material.
+                params[pname] = cached
+                warnings.append(
+                    "%s: '%s' could not be written out, so it points into "
+                    "Cinema 4D's asset cache -- set a default path in "
+                    "RS Bridge > Preferences" % (nname, pname))
             else:
                 warnings.append(
                     "%s: '%s' points into the Cinema 4D Asset Browser and "

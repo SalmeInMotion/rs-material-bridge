@@ -536,6 +536,48 @@ def _pkg_file(prefs):
     return os.path.join(prefs, "packages", PACKAGE_NAME + ".json")
 
 
+def current_houdini_source(prefs):
+    """Folder the existing Houdini package points at, or None.
+
+    Installing from a second copy silently repoints it, and then one
+    application runs one version while the other runs another -- which
+    looks exactly like the tool being broken. Worth saying out loud."""
+    try:
+        with open(_pkg_file(prefs), "r", encoding="utf-8") as f:
+            package = json.load(f)
+    except (IOError, OSError, ValueError):
+        return None
+    for entry in package.get("env") or []:
+        value = entry.get("RS_MATERIAL_BRIDGE")
+        if isinstance(value, str) and value:
+            return os.path.normpath(value)
+    return None
+
+
+def current_c4d_source(prefs):
+    """Where the installed Cinema 4D copy came from, if it recorded it."""
+    marker = os.path.join(_c4d_script_dir(prefs), "__installed__")
+    try:
+        with open(marker, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("source:"):
+                    return os.path.normpath(line.split(":", 1)[1].strip())
+    except (IOError, OSError):
+        pass
+    return None
+
+
+def foreign_install(prefs, getter):
+    """The other copy an application is set up from, if it is not this
+    one."""
+    other = getter(prefs)
+    if not other:
+        return None
+    if os.path.normcase(other) == os.path.normcase(os.path.normpath(REPO_DIR)):
+        return None
+    return other
+
+
 def install_houdini(prefs, log):
     pkg_dir = os.path.join(prefs, "packages")
     os.makedirs(pkg_dir, exist_ok=True)
@@ -548,9 +590,12 @@ def install_houdini(prefs, log):
         ],
         "path": "$RS_MATERIAL_BRIDGE/houdini/package",
     }
+    previous = foreign_install(prefs, current_houdini_source)
     target = _pkg_file(prefs)
     with open(target, "w", encoding="utf-8") as f:
         json.dump(package, f, indent=4)
+    if previous:
+        log("Houdini: WAS set up from %s -- now pointing here" % previous)
     log("Houdini: wrote %s" % target)
     log("         menu 'RS Bridge' + shelf tab will appear on restart")
     return True
@@ -618,6 +663,15 @@ def _refresh_dir(dest, files, log, what):
             shutil.copy2(src, target)
         except shutil.SameFileError:
             pass  # installing onto itself
+    # Record where this came from, so a later install can tell the user it
+    # is replacing a set-up that pointed somewhere else.
+    try:
+        with open(os.path.join(dest, "__installed__"), "w",
+                  encoding="utf-8") as f:
+            f.write("installed by %s %s\n" % (APP_NAME, _tool_version()))
+            f.write("source: %s\n" % REPO_DIR)
+    except OSError:
+        pass
     log("C4D: %s -> %s" % (what, dest))
     return True
 
@@ -625,6 +679,9 @@ def _refresh_dir(dest, files, log, what):
 def install_c4d(prefs, log, with_menu=True):
     """Scripts and menu plugin are installed independently: a failure in
     one must not silently cost the user the other."""
+    previous = foreign_install(prefs, current_c4d_source)
+    if previous:
+        log("C4D: WAS set up from %s -- now pointing here" % previous)
     ok = _refresh_dir(
         _c4d_script_dir(prefs),
         [os.path.join(C4D_SRC_DIR, n) for n in C4D_SCRIPT_FILES],
@@ -698,9 +755,11 @@ class InstallerUI(object):
 
         self.log_box = tk.Text(frm, height=11, wrap="word")
         self.log_box.pack(fill="both", expand=True)
-        self.log("Installing from: %s" % REPO_DIR)
+        self.log("Installing version %s from: %s"
+                 % (_tool_version(), REPO_DIR))
         self.log("Nothing is written outside your Houdini / C4D preference "
                  "folders.")
+        self._report_foreign_installs()
         roots = find_redshift_roots()
         if roots:
             self.log("Redshift found: %s" % roots[0])
@@ -708,6 +767,27 @@ class InstallerUI(object):
             self.log("NOTE: no Redshift installation found. The bridge "
                      "needs Redshift in both applications; the versions "
                      "offered above are a best guess.")
+
+    def _report_foreign_installs(self):
+        """Name any application already set up from a different copy.
+
+        One application running one version while the other runs another
+        looks exactly like the tool misbehaving, and costs an afternoon
+        before anyone thinks to check."""
+        clashes = []
+        for _label, path, preselect in houdini_targets():
+            if preselect and path:
+                other = foreign_install(path, current_houdini_source)
+                if other:
+                    clashes.append(("Houdini", other))
+        for _label, path, preselect in c4d_targets():
+            if preselect and path:
+                other = foreign_install(path, current_c4d_source)
+                if other:
+                    clashes.append(("Cinema 4D", other))
+        for app, other in clashes:
+            self.log("NOTE: %s is currently set up from %s -- Install will "
+                     "point it here instead." % (app, other))
 
     def _app_section(self, parent, title, found, empty_hint):
         box = ttk.LabelFrame(parent, text=title, padding=10)

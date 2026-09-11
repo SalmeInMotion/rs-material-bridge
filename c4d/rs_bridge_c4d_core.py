@@ -27,7 +27,7 @@ from c4d import gui
 
 FORMAT_NAME = "rs-material-bridge"
 FORMAT_VERSION = 2
-TOOL_VERSION = "0.9.0-beta.2"
+TOOL_VERSION = "0.9.0-beta.3"
 
 # Ramps. Each application names its interpolation modes differently, so the
 # interchange uses a neutral vocabulary and each side maps to its own.
@@ -1645,10 +1645,19 @@ def run_preferences():
     prefs["default_path"] = chosen
     save_prefs(prefs)
     _log("default path set to %s" % chosen)
-    gui.MessageDialog(
-        "Default path set to:\n%s\n\nTextures that only exist inside the "
-        "Asset Browser will be written to\n%s\\%s\\<category>\\<material>"
-        % (chosen, chosen, ASSET_EXPORT_FOLDER))
+    show_report(
+        "RS Bridge -- Preferences",
+        ["Default path set to:",
+         "   %s" % chosen,
+         "",
+         "Asset Browser textures will be written to",
+         "   %s\\%s\\<category>\\<material>" % (chosen, ASSET_EXPORT_FOLDER),
+         "",
+         "Bridge version: %s" % TOOL_VERSION,
+         "Running from:   %s" % os.path.dirname(os.path.abspath(__file__)),
+         "Preferences:    %s" % PREFS_FILE,
+         "Clipboard:      %s" % CLIP_FILE],
+        [])
 
 
 def run_paste():

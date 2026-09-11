@@ -109,6 +109,13 @@ class PreferencesCommand(plugins.CommandData):
         return c4d.CMD_ENABLED
 
 
+def _menu_title():
+    """The menu carries the version, so which build is running is visible
+    at a glance instead of being something to go and check."""
+    version = getattr(bridge, "TOOL_VERSION", None) if bridge else None
+    return "RS Bridge %s" % version if version else "RS Bridge"
+
+
 def _build_menu():
     """Insert an 'RS Bridge' menu into the main menu bar."""
     main_menu = gui.GetMenuResource("M_EDITOR")
@@ -117,11 +124,12 @@ def _build_menu():
     # Don't add the menu twice when C4D rebuilds it (layout changes).
     for _index, value in main_menu:
         if isinstance(value, c4d.BaseContainer) and \
-                value.GetString(c4d.MENURESOURCE_SUBTITLE) == "RS Bridge":
+                value.GetString(c4d.MENURESOURCE_SUBTITLE).startswith(
+                    "RS Bridge"):
             return
 
     menu = c4d.BaseContainer()
-    menu.InsData(c4d.MENURESOURCE_SUBTITLE, "RS Bridge")
+    menu.InsData(c4d.MENURESOURCE_SUBTITLE, _menu_title())
     menu.InsData(c4d.MENURESOURCE_COMMAND,
                  "PLUGIN_CMD_%d" % PLUGIN_ID_COPY)
     menu.InsData(c4d.MENURESOURCE_COMMAND,

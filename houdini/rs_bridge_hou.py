@@ -35,7 +35,7 @@ import hou
 
 FORMAT_NAME = "rs-material-bridge"
 FORMAT_VERSION = 2
-TOOL_VERSION = "0.9.0-beta.2"
+TOOL_VERSION = "0.9.0-beta.3"
 
 # Ramps travel with a neutral interpolation vocabulary; each application
 # maps it onto its own. Houdini's exotic bases (Bezier, B-Spline, Hermite)

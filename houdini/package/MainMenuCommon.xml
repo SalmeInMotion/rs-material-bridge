@@ -48,18 +48,24 @@ if hou.isUIAvailable():
             </scriptItem>
 
             <scriptItem id="rs_bridge_about">
-                <label>About / Clipboard Location</label>
+                <label>Version and paths...</label>
                 <scriptCode><![CDATA[
+import importlib
+import os
 import rs_bridge_hou
+importlib.reload(rs_bridge_hou)
 import hou
-msg = ("RS Material Bridge %s\n\n"
-       "Clipboard file:\n%s\n\n"
-       "Copy a Redshift material here, then run Paste in the other\n"
-       "application (Cinema 4D)."
-       % (rs_bridge_hou.TOOL_VERSION, rs_bridge_hou.CLIP_FILE))
-print(msg)
-if hou.isUIAvailable():
-    hou.ui.displayMessage(msg)
+lines = [
+    "RS Material Bridge",
+    "",
+    "Version:      %s" % rs_bridge_hou.TOOL_VERSION,
+    "Running from: %s" % os.path.dirname(
+        os.path.abspath(rs_bridge_hou.__file__)),
+    "Clipboard:    %s" % rs_bridge_hou.CLIP_FILE,
+    "Scene units:  %s metres per unit" % rs_bridge_hou.scene_meters_per_unit(),
+]
+warnings = [w for w in (rs_bridge_hou._staleness_warning(),) if w]
+rs_bridge_hou._show_report("RS Bridge -- Version", lines, warnings)
                 ]]></scriptCode>
             </scriptItem>
         </subMenu>

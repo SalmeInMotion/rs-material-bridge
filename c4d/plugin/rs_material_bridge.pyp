@@ -126,7 +126,9 @@ def _build_menu():
                  "PLUGIN_CMD_%d" % PLUGIN_ID_COPY)
     menu.InsData(c4d.MENURESOURCE_COMMAND,
                  "PLUGIN_CMD_%d" % PLUGIN_ID_PASTE)
-    menu.InsData(c4d.MENURESOURCE_SEPERATOR, True)
+    separator = getattr(c4d, "MENURESOURCE_SEPARATOR", None)
+    if separator is not None:
+        menu.InsData(separator, True)
     menu.InsData(c4d.MENURESOURCE_COMMAND,
                  "PLUGIN_CMD_%d" % PLUGIN_ID_PREFS)
 
@@ -139,7 +141,12 @@ def _build_menu():
 
 def PluginMessage(msg_id, data):
     if msg_id == c4d.C4DPL_BUILDMENU:
-        _build_menu()
+        # Anything raised here costs the whole menu silently, so a single
+        # bad call can never be worth taking the entry down with it.
+        try:
+            _build_menu()
+        except Exception as e:
+            print("[RS Bridge] could not build the menu: %r" % (e,))
     return True
 
 

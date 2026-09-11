@@ -21,32 +21,52 @@ from c4d import plugins, gui
 PLUGIN_ID_COPY = 1000001
 PLUGIN_ID_PASTE = 1000002
 
+CORE_NAME = "rs_bridge_c4d_core.py"
 _HERE = os.path.dirname(os.path.abspath(__file__))
+# Resolved separately: the plugin folder may be a link into a working copy,
+# and the module then sits beside the *real* folder, not beside the link.
+_REAL = os.path.dirname(os.path.realpath(__file__))
 
-# Installed, the core module sits next to this file; running straight from
-# the repository it is one level up. Both are relative to this file, so no
-# install path is hardcoded either way.
-for _cand in (_HERE, os.path.dirname(_HERE)):
-    if os.path.isfile(os.path.join(_cand, "rs_bridge_c4d_core.py")):
-        if _cand not in sys.path:
-            sys.path.insert(0, _cand)
-        break
+bridge = None
 
-try:
-    import rs_bridge_c4d_core as bridge
-except ImportError:
-    bridge = None
+
+def _load_bridge():
+    """Find and import the core module. Installed it sits next to this
+    file; run from a working copy it is one level up. Every candidate is
+    derived from this file's own location, so no install path is
+    hardcoded."""
+    global bridge
+    candidates = []
+    for base in (_HERE, _REAL):
+        candidates.append(base)
+        candidates.append(os.path.dirname(base))
+    for cand in candidates:
+        if not os.path.isfile(os.path.join(cand, CORE_NAME)):
+            continue
+        if cand not in sys.path:
+            sys.path.insert(0, cand)
+        try:
+            import rs_bridge_c4d_core
+            bridge = rs_bridge_c4d_core
+            return True
+        except ImportError as e:
+            print("[RS Bridge] found %s in %s but could not import it: %s"
+                  % (CORE_NAME, cand, e))
+    return False
+
+
+_load_bridge()
 
 
 def _require_bridge():
-    """Reload before every command so an updated core module takes effect
-    without restarting Cinema 4D -- and, more importantly, so the plugin
-    can never run a stale copy of it."""
+    """Reload before every command, so an updated core module takes effect
+    without restarting Cinema 4D and a stale copy can never run. Retries
+    the search too, so a re-run installer is picked up without a restart."""
     global bridge
-    if bridge is None:
+    if bridge is None and not _load_bridge():
         gui.MessageDialog(
-            "RS Material Bridge: rs_bridge_c4d_core.py was not found near\n"
-            "%s\n\nRe-run the installer." % _HERE)
+            "RS Material Bridge: %s was not found near\n%s\n\n"
+            "Re-run the installer." % (CORE_NAME, _HERE))
         return False
     try:
         importlib.reload(bridge)

@@ -199,6 +199,29 @@ def _read_clip():
     return data
 
 
+try:
+    _LOADED_MTIME = os.path.getmtime(os.path.abspath(__file__))
+except (OSError, NameError):
+    _LOADED_MTIME = 0.0
+
+
+def _staleness_warning():
+    """Running code older than the code on disk has wasted hours here
+    already: a fix looks like it did not work, and the next hour goes into
+    re-debugging something that was already fixed. Say it out loud."""
+    if not _LOADED_MTIME:
+        return None
+    try:
+        on_disk = os.path.getmtime(os.path.abspath(__file__))
+    except OSError:
+        return None
+    if on_disk > _LOADED_MTIME + 1.0:
+        return ("this Houdini session is running an older copy of the "
+                "bridge than the files on disk -- restart Houdini so the "
+                "update takes effect")
+    return None
+
+
 def _ui_status(msg):
     try:
         if hou.isUIAvailable():
@@ -630,6 +653,9 @@ def copy_selected_material():
         return None
 
     data = export_materials(builders)
+    stale = _staleness_warning()
+    if stale:
+        data["warnings"].insert(0, stale)
     _write_clip(data)
 
     copied = data["materials"]
@@ -880,6 +906,9 @@ def build_hou_material(mat, matnet, type_map, warnings):
 def import_materials(data, dest="/mat"):
     """Rebuild every material in the clipboard under `dest`."""
     warnings = list(data.get("warnings", []))
+    stale = _staleness_warning()
+    if stale:
+        warnings.insert(0, stale)
     materials = clipboard_materials(data)
     if not materials:
         raise RuntimeError("The clipboard holds no material.")

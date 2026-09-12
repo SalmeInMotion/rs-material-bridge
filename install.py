@@ -881,8 +881,8 @@ class InstallerUI(object):
 
 
 def main_cli():
-    print("%s %s -- console install (tkinter unavailable)"
-          % (APP_NAME, _tool_version()))
+    print("%s %s -- console install from %s"
+          % (APP_NAME, _tool_version(), REPO_DIR))
     def log(m):
         print("  " + m)
     for _label, path, preselect in houdini_targets():
@@ -895,7 +895,9 @@ def main_cli():
 
 
 def main():
-    if tk is None:
+    # --cli keeps the installer scriptable: an automated deployment must
+    # not need someone to click a button.
+    if tk is None or "--cli" in sys.argv[1:]:
         main_cli()
         return
     root = tk.Tk()

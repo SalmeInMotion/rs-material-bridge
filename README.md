@@ -96,12 +96,33 @@ of each version is preselected; the rest stay listed and selectable.
 
 ### Developer setup
 
-To work on the code without reinstalling, link instead of copying — the
-installer detects links and leaves them alone:
+The editable source of truth is **`P:\IA\Tools\C4D\rs-material-bridge`**
+(pCloud), written by one machine at a time — currently CHOFOSTATION.
+Migrated there on 2026-09-12; the previous location is quarantined at
+`C:\IA\Tools\C4D\_transferred_2026-09-12_rs-material-bridge`, which also
+carries the rollback instructions.
+
+Cinema 4D and Houdini load the tool from **`C:\IA\Tools\C4D\rs-material-bridge-deploy`**,
+an ordinary installation exactly like a user's — so neither application
+depends on pCloud being mounted, and what gets tested is what a customer
+would run. That folder is a build output: never edit it.
+
+After changing the source, deploy:
 
 ```powershell
-New-Item -ItemType Junction -Path "<c4d prefs>\library\scripts\rs-material-bridge" -Target "<repo>\c4d"
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+    "P:\IA\Tools\C4D\rs-material-bridge\tools\deploy_to_c.ps1"
 ```
+
+It refreshes the C: copy and re-runs the installer, then Cinema 4D and
+Houdini need restarting. Check which build is loaded with **RS Bridge >
+Version and paths...** (Houdini) or the version in the menu title (C4D) —
+the running copy and its folder are both reported.
+
+Linking the preference folders straight at the source also works and
+avoids the deploy step, but then the applications need P: mounted at
+startup, and a stale link is easy to miss. The installer leaves existing
+links alone if you prefer that trade-off.
 
 ## Interchange format (v2)
 

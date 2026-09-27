@@ -1,6 +1,6 @@
 # RS Material Bridge — beta testing guide
 
-**Version: 0.9.0-beta.2** — thanks for testing! This tool copy/pastes
+**Version: 0.9.0-beta.3** — thanks for testing! This tool copy/pastes
 Redshift node materials between **Houdini** and **Cinema 4D**, in both
 directions, rebuilding the material natively on the other side (no USD, no
 proxies, fully editable result).
@@ -24,6 +24,11 @@ Then run the installer below. From this version on, updating is just
 
 ## What changed since your report
 
+This beta fixes a Cinema 4D hang when importing Houdini-authored Redshift
+ramps whose variadic point ports are nested or have non-numeric IDs. Please
+test Houdini -> Cinema 4D with a ramp, and check both the graph connections
+and ramp knot values.
+
 Everything you found or asked for — see [CHANGELOG.md](CHANGELOG.md) for
 the full list. The short version: the checkbox bug is fixed (it was real
 and it affected every material), ramps now travel, several materials can
@@ -33,8 +38,8 @@ on top of each other.
 
 Two things worth re-testing specifically: **the checkbox bug you found**
 (it is your report — please confirm the fix in a real material), and
-**ramps**, which are new and where the interpolation is mapped rather
-than identical.
+**Houdini -> C4D ramp pastes**, the path that previously froze C4D. Please
+include the RS Bridge report and clipboard fixture if anything differs.
 
 ## What it CAN do today
 

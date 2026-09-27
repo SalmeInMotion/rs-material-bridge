@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0-beta.3 - 2026-09-27
+
+### Fixed
+
+- Cinema 4D no longer retries forever when a Houdini-authored Redshift ramp
+  exposes its variadic point ports through nested or non-numeric port IDs.
+  The importer now finds the nested Points port, preserves the graph's child
+  order as a fallback, and reports when adding ports makes no progress.
+
+### Verification
+
+- The supplied Houdini-to-C4D regression fixture imported in Cinema 4D 2026.3.3
+  without freezing; all seven fixture nodes, including the scalar ramp, were
+  present and the C4D bridge remained responsive.
+- A live C4D -> Houdini -> C4D round-trip was also reported successful, with
+  the material data arriving correctly.
+- This beta needs further external testing of ramp knot values and graph
+  connections on other supported Cinema 4D / Redshift builds.
+
 ## 0.9.0-beta.2 — 2026-09-09
 
 Everything reported in the first beta round, plus the groundwork that fell

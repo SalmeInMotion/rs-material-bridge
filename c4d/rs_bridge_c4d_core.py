@@ -837,17 +837,37 @@ def _url_from_path(path):
 _KNOT_RE = re.compile(r"^_(\d+)$")
 
 
+def _ramp_points_port(port):
+    """Return the nested variadic Points port of a Redshift spline ramp."""
+    pending = [port]
+    while pending:
+        parent = pending.pop()
+        children = _children(parent) or []
+        for child in children:
+            if str(_last_segment(child)).lower() == "points":
+                return child
+        pending.extend(reversed(children))
+    return None
+
+
 def ramp_knot_ports(port):
     """Knot ports of a ramp container, in index order, or None if `port`
-    is not a ramp. A ramp is an array port whose children are _0, _1..."""
+    is not a ramp. Redshift spline ramps nest the _0, _1... knot ports under
+    the variadic `Points` port; older flat layouts remain readable."""
     kids = _children(port)
+    points_port = _ramp_points_port(port)
+    if points_port is not None:
+        kids = _children(points_port)
+        if not kids:
+            return []
     if not kids:
         return None
     indexed = []
     for c in kids:
         m = _KNOT_RE.match(_last_segment(c))
         if m is None:
-            return None
+            # Maxon does not guarantee variadic child IDs; keep graph order.
+            return kids
         indexed.append((int(m.group(1)), c))
     return [c for _i, c in sorted(indexed)]
 
@@ -897,21 +917,51 @@ def import_ramp(port, ramp_json, node_name, warnings):
         warnings.append("%s: ramp has %d knots but only %d were sent; the "
                         "extra ones keep their previous values"
                         % (node_name, len(existing), len(knots)))
-    # Knot ports cannot be removed, only added -- indices must stay unique.
-    next_index = 0
-    for c in existing:
-        m = _KNOT_RE.match(_last_segment(c))
-        if m:
-            next_index = max(next_index, int(m.group(1)) + 1)
-    while len(existing) < len(knots):
-        try:
-            port.AddPort("_%d" % next_index)
-        except Exception as e:
-            warnings.append("%s: could not add ramp knot %d (%s)"
-                            % (node_name, next_index, e))
-            break
-        next_index += 1
-        existing = ramp_knot_ports(port) or []
+    # Redshift's spline is a port bundle; its knot instances belong to the
+    # nested variadic Points port, not to the Ramp bundle itself.
+    if len(existing) < len(knots):
+        points_port = _ramp_points_port(port)
+        if points_port is not None:
+            before = len(existing)
+            missing = len(knots) - before
+            try:
+                points_port.AddPorts(before, missing)
+            except Exception as e:
+                warnings.append("%s: could not add %d ramp knot(s) to Points (%s)"
+                                % (node_name, missing, e))
+            updated = ramp_knot_ports(port) or []
+            if len(updated) <= before:
+                warnings.append("%s: ramp Points count did not advance (%d -> %d); "
+                                "expected %d knots"
+                                % (node_name, before, len(updated), len(knots)))
+            elif len(updated) < len(knots):
+                warnings.append("%s: ramp Points contains %d of %d requested knots"
+                                % (node_name, len(updated), len(knots)))
+            existing = updated
+        else:
+            # Keep legacy flat-ramp compatibility, but never retry an add
+            # which the graph does not expose as a new knot.
+            next_index = 0
+            for c in existing:
+                m = _KNOT_RE.match(_last_segment(c))
+                if m:
+                    next_index = max(next_index, int(m.group(1)) + 1)
+            while len(existing) < len(knots):
+                before = len(existing)
+                try:
+                    port.AddPort("_%d" % next_index)
+                except Exception as e:
+                    warnings.append("%s: could not add ramp knot %d (%s)"
+                                    % (node_name, next_index, e))
+                    break
+                next_index += 1
+                updated = ramp_knot_ports(port) or []
+                if len(updated) <= before:
+                    warnings.append("%s: ramp knot count did not advance (%d -> %d); "
+                                    "stopping to avoid a stalled import"
+                                    % (node_name, before, len(updated)))
+                    break
+                existing = updated
 
     for knot_port, knot in zip(existing, knots):
         sub = {}
